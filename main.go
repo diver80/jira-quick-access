@@ -12,6 +12,8 @@ import (
 	"github.com/gogpu/gogpu"
 	"github.com/gogpu/ui/app"
 	"github.com/gogpu/ui/desktop"
+	"github.com/gogpu/ui/theme"
+	"github.com/gogpu/ui/widget"
 )
 
 func main() {
@@ -21,46 +23,45 @@ func main() {
 	// 2. Initialize Jira multi-tenant REST client
 	client := jira.NewClient(cfg)
 
-	// 3. Initialize Gogpu engine with Native Transparency & Frameless styling
+	// 3. Initialize Gogpu engine
 	gogpuApp := gogpu.NewApp(gogpu.Config{
-		Title:       "",
-		Width:       26,
-		Height:      210,
-		Frameless:   true,
-		Transparent: true,
+		Title:  "",
+		Width:  26,
+		Height: 210,
 	})
 
-	// 4. Create UI Application connected to the GPU Window & Event Pipeline
+	// 4. Custom transparent theme so UI canvas clears with alpha=0 (no white corners)
+	transparentTheme := theme.DefaultDark()
+	transparentTheme.Colors.Background = widget.RGBA8(0, 0, 0, 0)
+	transparentTheme.Colors.Surface = widget.RGBA8(0, 0, 0, 0)
+
+	// 5. Create UI Application connected to the GPU Window & Event Pipeline
 	uiApp := app.New(
 		app.WithWindowProvider(gogpuApp),
 		app.WithPlatformProvider(gogpuApp),
 		app.WithEventSource(gogpuApp.EventSource()),
+		app.WithTheme(transparentTheme),
 		app.WithRenderMode(app.RenderModeFrameworkManaged),
 	)
 
-	// 5. Initialize the Edge Rail HUD Root View with resize & redraw hooks
+	// 6. Initialize the Edge Rail HUD Root View
 	rootView := ui.NewAppView(
 		cfg,
 		client,
 		func() {
 			gogpuApp.RequestRedraw()
 		},
-		func(w, h int) {
-			gogpuApp.RequestSize(w, h)
-			gogpuApp.RequestRedraw()
-		},
 	)
 
 	uiApp.SetRoot(rootView)
 
-	// 6. Background poller & edge dock positioning
+	// 7. Background poller & edge dock positioning
 	go func() {
 		for _, delay := range []time.Duration{80 * time.Millisecond, 250 * time.Millisecond, 600 * time.Millisecond} {
 			time.Sleep(delay)
 			if window.DefaultManager != nil {
 				_ = window.DefaultManager.InitEdgeRail(26, 210)
 			}
-			gogpuApp.RequestSize(26, 210)
 			gogpuApp.RequestRedraw()
 		}
 
@@ -75,7 +76,7 @@ func main() {
 
 	fmt.Println("🚀 Jira Quick Access (Edge Rail HUD) running with transparent GPU canvas...")
 
-	// 7. Run GPU desktop pipeline
+	// 8. Run GPU desktop pipeline
 	if err := desktop.Run(gogpuApp, uiApp); err != nil {
 		log.Fatalf("Fatal error running desktop app: %v", err)
 	}

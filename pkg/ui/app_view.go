@@ -59,14 +59,12 @@ type AppView struct {
 
 	// Callbacks
 	onRedraw func()
-	onResize func(w, h int)
 }
 
 func NewAppView(
 	cfg jira.Config,
 	client *jira.Client,
 	onRedraw func(),
-	onResize func(w, h int),
 ) *AppView {
 	cfg.EnsureInstances()
 	if cfg.Instances[0].APIToken == "" || cfg.Instances[0].Email == "" {
@@ -86,7 +84,6 @@ func NewAppView(
 		debugMode:       cfg.DebugMode,
 		intervalVal:     fmt.Sprintf("%d", cfg.PollInterval),
 		onRedraw:        onRedraw,
-		onResize:        onResize,
 	}
 
 	v.loadInstanceFields(0)
@@ -104,7 +101,7 @@ func NewAppView(
 			searchAct := v.searchActive || v.searchQuery != ""
 			v.mu.Unlock()
 
-			if st == window.StateFan && !searchAct && !lastH.IsZero() && time.Since(lastH) > 260*time.Millisecond {
+			if st == window.StateFan && !searchAct && !lastH.IsZero() && time.Since(lastH) > 280*time.Millisecond {
 				v.SetState(window.StateRest)
 			}
 		}
@@ -234,10 +231,6 @@ func (v *AppView) SetState(newState window.WindowState) {
 
 	if window.DefaultManager != nil {
 		window.DefaultManager.SetState(newState, w, h)
-	}
-
-	if v.onResize != nil {
-		v.onResize(w, h)
 	}
 
 	if newState == window.StateExpanded && !showSettings {
