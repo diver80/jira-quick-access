@@ -91,17 +91,17 @@ func NewAppView(
 	v.SetVisible(true)
 	v.SetEnabled(true)
 
-	// Background timer to collapse Fan state back to Rest when inactive
+	// Smooth debounce timer: collapse Fan state back to Rest ONLY after 400ms of true inactivity
 	go func() {
 		for {
-			time.Sleep(60 * time.Millisecond)
+			time.Sleep(80 * time.Millisecond)
 			v.mu.Lock()
 			st := v.state
 			lastH := v.lastHover
 			searchAct := v.searchActive || v.searchQuery != ""
 			v.mu.Unlock()
 
-			if st == window.StateFan && !searchAct && !lastH.IsZero() && time.Since(lastH) > 280*time.Millisecond {
+			if st == window.StateFan && !searchAct && !lastH.IsZero() && time.Since(lastH) > 400*time.Millisecond {
 				v.SetState(window.StateRest)
 			}
 		}
@@ -474,15 +474,16 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	filteredIssues := v.getFilteredIssues()
 
 	// =========================================================================
-	// 1. STATE REST: Discrete macOS Dock Capsule with 2:23:6 Proportional Gauges
+	// 1. STATE REST: macOS Dock Glass Capsule with Stronger Frosted Rim
 	// =========================================================================
 	if st == window.StateRest {
 		pillRect := geometry.NewRect(b.Min.X, b.Min.Y, w, h)
-		// Deep obsidian glass backdrop
-		canvas.DrawRoundRect(pillRect, widget.RGBA8(16, 22, 34, 245), 13)
-		canvas.StrokeRoundRect(pillRect, widget.RGBA8(255, 255, 255, 45), 13, 1.0)
-		// Top specular highlight
-		canvas.DrawLine(geometry.Pt(b.Min.X+5, b.Min.Y+2), geometry.Pt(b.Min.X+w-5, b.Min.Y+2), widget.RGBA8(255, 255, 255, 110), 1.0)
+		// Deep macOS Dock obsidian glass backdrop
+		canvas.DrawRoundRect(pillRect, widget.RGBA8(16, 22, 34, 250), 13)
+		// Stronger macOS Dock frosted glass border (1.5px stroke with higher luminance)
+		canvas.StrokeRoundRect(pillRect, widget.RGBA8(255, 255, 255, 80), 13, 1.5)
+		// Top specular gloss line
+		canvas.DrawLine(geometry.Pt(b.Min.X+4, b.Min.Y+2), geometry.Pt(b.Min.X+w-4, b.Min.Y+2), widget.RGBA8(255, 255, 255, 140), 1.2)
 
 		instCount := len(instances)
 		if instCount == 0 {
@@ -518,37 +519,37 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 
 			// Distinct colors per instance
 			beaconColor := widget.RGBA8(56, 189, 248, 255) // Cyan (Avono)
-			beaconGlow := widget.RGBA8(56, 189, 248, 50)
+			beaconGlow := widget.RGBA8(56, 189, 248, 60)
 			inProgColor := widget.RGBA8(56, 189, 248, 255) // Light Cyan
 			todoColor := widget.RGBA8(14, 116, 144, 255)   // Dark Blue / Cyan
-			trackColor := widget.RGBA8(56, 189, 248, 35)   // Dim Cyan Track
+			trackColor := widget.RGBA8(56, 189, 248, 40)   // Dim Cyan Track
 			badgeBg := widget.RGBA8(24, 34, 52, 240)
-			badgeBorder := widget.RGBA8(56, 189, 248, 120)
+			badgeBorder := widget.RGBA8(56, 189, 248, 140)
 
 			if idx == 1 {
 				beaconColor = widget.RGBA8(168, 85, 247, 255) // Purple (Sandbox)
-				beaconGlow = widget.RGBA8(168, 85, 247, 50)
+				beaconGlow = widget.RGBA8(168, 85, 247, 60)
 				inProgColor = widget.RGBA8(192, 132, 252, 255) // Light Purple
 				todoColor = widget.RGBA8(107, 33, 168, 255)    // Darker Violet
-				trackColor = widget.RGBA8(168, 85, 247, 35)    // Dim Purple Track
+				trackColor = widget.RGBA8(168, 85, 247, 40)    // Dim Purple Track
 				badgeBg = widget.RGBA8(38, 26, 56, 240)
-				badgeBorder = widget.RGBA8(168, 85, 247, 120)
+				badgeBorder = widget.RGBA8(168, 85, 247, 140)
 			} else if idx == 2 {
 				beaconColor = widget.RGBA8(234, 179, 8, 255) // Amber (Sandbox)
-				beaconGlow = widget.RGBA8(234, 179, 8, 50)
+				beaconGlow = widget.RGBA8(234, 179, 8, 60)
 				inProgColor = widget.RGBA8(250, 204, 21, 255) // Light Yellow/Amber
 				todoColor = widget.RGBA8(161, 98, 7, 255)     // Darker Amber
-				trackColor = widget.RGBA8(234, 179, 8, 35)    // Dim Amber Track
+				trackColor = widget.RGBA8(234, 179, 8, 40)    // Dim Amber Track
 				badgeBg = widget.RGBA8(48, 38, 20, 240)
-				badgeBorder = widget.RGBA8(234, 179, 8, 120)
+				badgeBorder = widget.RGBA8(234, 179, 8, 140)
 			} else if idx > 2 {
 				beaconColor = widget.RGBA8(34, 197, 94, 255) // Emerald
-				beaconGlow = widget.RGBA8(34, 197, 94, 50)
+				beaconGlow = widget.RGBA8(34, 197, 94, 60)
 				inProgColor = widget.RGBA8(74, 222, 128, 255)
 				todoColor = widget.RGBA8(21, 128, 61, 255)
-				trackColor = widget.RGBA8(34, 197, 94, 35)
+				trackColor = widget.RGBA8(34, 197, 94, 40)
 				badgeBg = widget.RGBA8(20, 44, 30, 240)
-				badgeBorder = widget.RGBA8(34, 197, 94, 120)
+				badgeBorder = widget.RGBA8(34, 197, 94, 140)
 			}
 
 			// Instance Beacon Core & Radiant Glow
@@ -562,7 +563,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			lineTotalH := lineBottomY - lineTopY
 
 			// 1. Draw background full track in subtle dim tone
-			canvas.DrawLine(geometry.Pt(b.Min.X+1, lineTopY), geometry.Pt(b.Min.X+1, lineBottomY), trackColor, 2.0)
+			canvas.DrawLine(geometry.Pt(b.Min.X+1.5, lineTopY), geometry.Pt(b.Min.X+1.5, lineBottomY), trackColor, 2.0)
 
 			// 2. Scale line height proportionally to maxCount (e.g. 2/23 vs 23/23 vs 6/23)
 			ratio := float32(count) / float32(maxCount)
@@ -591,19 +592,19 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				// In Progress segment
 				if inProgCount > 0 {
 					segH := fillH * (float32(inProgCount) / float32(count))
-					canvas.DrawLine(geometry.Pt(b.Min.X+1, curY), geometry.Pt(b.Min.X+1, curY+segH), inProgColor, 2.0)
+					canvas.DrawLine(geometry.Pt(b.Min.X+1.5, curY), geometry.Pt(b.Min.X+1.5, curY+segH), inProgColor, 2.0)
 					curY += segH
 				}
 				// To Do segment
 				if todoCount > 0 {
 					segH := fillH * (float32(todoCount) / float32(count))
-					canvas.DrawLine(geometry.Pt(b.Min.X+1, curY), geometry.Pt(b.Min.X+1, curY+segH), todoColor, 2.0)
+					canvas.DrawLine(geometry.Pt(b.Min.X+1.5, curY), geometry.Pt(b.Min.X+1.5, curY+segH), todoColor, 2.0)
 					curY += segH
 				}
 				// Done segment
 				if doneCount > 0 {
 					segH := fillH * (float32(doneCount) / float32(count))
-					canvas.DrawLine(geometry.Pt(b.Min.X+1, curY), geometry.Pt(b.Min.X+1, curY+segH), widget.RGBA8(34, 197, 94, 255), 2.0)
+					canvas.DrawLine(geometry.Pt(b.Min.X+1.5, curY), geometry.Pt(b.Min.X+1.5, curY+segH), widget.RGBA8(34, 197, 94, 255), 2.0)
 				}
 			}
 
@@ -619,17 +620,17 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			// Subtle Divider between instances
 			if idx < len(instances)-1 {
 				sepY := secY + instSectionH - 2
-				canvas.DrawLine(geometry.Pt(b.Min.X+5, sepY), geometry.Pt(b.Min.X+w-5, sepY), widget.RGBA8(255, 255, 255, 30), 1.0)
+				canvas.DrawLine(geometry.Pt(b.Min.X+5, sepY), geometry.Pt(b.Min.X+w-5, sepY), widget.RGBA8(255, 255, 255, 35), 1.0)
 			}
 		}
 
 		// Divider before settings
 		dividerY := b.Min.Y + h - 28
-		canvas.DrawLine(geometry.Pt(b.Min.X+5, dividerY), geometry.Pt(b.Min.X+w-5, dividerY), widget.RGBA8(255, 255, 255, 45), 1.0)
+		canvas.DrawLine(geometry.Pt(b.Min.X+5, dividerY), geometry.Pt(b.Min.X+w-5, dividerY), widget.RGBA8(255, 255, 255, 50), 1.0)
 
 		// Settings Icon with clear visibility
 		settingsCenter := geometry.Pt(b.Min.X+w/2, b.Min.Y+h-14)
-		canvas.DrawCircle(settingsCenter, 6.0, widget.RGBA8(180, 200, 230, 40))
+		canvas.DrawCircle(settingsCenter, 6.0, widget.RGBA8(180, 200, 230, 45))
 		canvas.DrawCircle(settingsCenter, 3.5, widget.RGBA8(200, 220, 245, 240))
 		return
 	}
@@ -639,9 +640,9 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	// =========================================================================
 	if st == window.StateFan {
 		railBackdrop := geometry.NewRect(b.Min.X, b.Min.Y, w, h)
-		canvas.DrawRoundRect(railBackdrop, widget.RGBA8(24, 32, 48, 185), 14)
-		canvas.StrokeRoundRect(railBackdrop, widget.RGBA8(255, 255, 255, 60), 14, 1.0)
-		canvas.DrawLine(geometry.Pt(b.Min.X+6, b.Min.Y+2), geometry.Pt(b.Min.X+w-6, b.Min.Y+2), widget.RGBA8(255, 255, 255, 120), 1.0)
+		canvas.DrawRoundRect(railBackdrop, widget.RGBA8(24, 32, 48, 195), 14)
+		canvas.StrokeRoundRect(railBackdrop, widget.RGBA8(255, 255, 255, 75), 14, 1.5)
+		canvas.DrawLine(geometry.Pt(b.Min.X+6, b.Min.Y+2), geometry.Pt(b.Min.X+w-6, b.Min.Y+2), widget.RGBA8(255, 255, 255, 130), 1.2)
 
 		// Top Instance Header Pill
 		instName := "All Instances"
@@ -662,7 +663,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 
 		instHeaderRect := geometry.NewRect(b.Min.X+6, b.Min.Y+7, w-12, 20)
 		canvas.DrawRoundRect(instHeaderRect, widget.RGBA8(36, 46, 68, 220), 4)
-		canvas.StrokeRoundRect(instHeaderRect, widget.RGBA8(255, 255, 255, 35), 4, 1.0)
+		canvas.StrokeRoundRect(instHeaderRect, widget.RGBA8(255, 255, 255, 45), 4, 1.0)
 
 		canvas.DrawCircle(geometry.Pt(b.Min.X+13, b.Min.Y+17), 3.0, instBeaconColor)
 		canvas.DrawText(instName, geometry.NewRect(b.Min.X+18, b.Min.Y+11, w-24, 13), 9, widget.RGBA8(230, 240, 255, 255), true, widget.TextAlignCenter)
@@ -670,7 +671,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		// Search Bar
 		searchRect := geometry.NewRect(b.Min.X+6, b.Min.Y+31, w-12, 22)
 		searchBg := widget.RGBA8(14, 20, 30, 220)
-		searchBorder := widget.RGBA8(255, 255, 255, 30)
+		searchBorder := widget.RGBA8(255, 255, 255, 40)
 		if searchAct || searchQ != "" {
 			searchBg = widget.RGBA8(22, 32, 50, 240)
 			searchBorder = ColorStatusToDo
@@ -763,9 +764,9 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	// Right-side Dock Shelf Column
 	tabStartX := b.Min.X + w - tabBarWidth
 	dockShelfRect := geometry.NewRect(tabStartX-2, b.Min.Y+8, tabBarWidth-4, h-16)
-	canvas.DrawRoundRect(dockShelfRect, widget.RGBA8(24, 32, 48, 160), 12)
-	canvas.StrokeRoundRect(dockShelfRect, widget.RGBA8(255, 255, 255, 55), 12, 1.0)
-	canvas.DrawLine(geometry.Pt(tabStartX+4, b.Min.Y+10), geometry.Pt(b.Min.X+w-10, b.Min.Y+10), widget.RGBA8(255, 255, 255, 110), 1.0)
+	canvas.DrawRoundRect(dockShelfRect, widget.RGBA8(24, 32, 48, 175), 12)
+	canvas.StrokeRoundRect(dockShelfRect, widget.RGBA8(255, 255, 255, 70), 12, 1.5)
+	canvas.DrawLine(geometry.Pt(tabStartX+4, b.Min.Y+10), geometry.Pt(b.Min.X+w-10, b.Min.Y+10), widget.RGBA8(255, 255, 255, 120), 1.0)
 
 	// Draw side tabs inside the dock shelf with scroll support (Filtered to active instance)
 	tabStartY := b.Min.Y + float32(16) - scrollY
@@ -1067,13 +1068,9 @@ func (v *AppView) Event(ctx widget.Context, e event.Event) bool {
 		} else if ev.MouseType == event.MouseMove {
 			if contains {
 				return v.handleHover(ev.Position)
-			} else {
-				v.mu.Lock()
-				if v.state == window.StateFan {
-					v.lastHover = time.Now().Add(-500 * time.Millisecond)
-				}
-				v.mu.Unlock()
 			}
+			// When mouse moves outside bounds, do NOT instantly kill the hover timer.
+			// The background goroutine will smoothly collapse after 400ms of true inactivity.
 		}
 	case *event.WheelEvent:
 		filtered := v.getFilteredIssues()
