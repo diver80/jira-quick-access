@@ -94,14 +94,14 @@ func NewAppView(
 	// Background timer to collapse Fan state back to Rest when inactive
 	go func() {
 		for {
-			time.Sleep(250 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 			v.mu.Lock()
 			st := v.state
 			lastH := v.lastHover
 			searchAct := v.searchActive || v.searchQuery != ""
 			v.mu.Unlock()
 
-			if st == window.StateFan && !searchAct && !lastH.IsZero() && time.Since(lastH) > 1400*time.Millisecond {
+			if st == window.StateFan && !searchAct && !lastH.IsZero() && time.Since(lastH) > 380*time.Millisecond {
 				v.SetState(window.StateRest)
 			}
 		}
@@ -991,6 +991,12 @@ func (v *AppView) Event(ctx widget.Context, e event.Event) bool {
 		} else if ev.MouseType == event.MouseMove {
 			if contains {
 				return v.handleHover(ev.Position)
+			} else {
+				v.mu.Lock()
+				if v.state == window.StateFan && !v.lastHover.IsZero() {
+					v.lastHover = time.Now().Add(-200 * time.Millisecond)
+				}
+				v.mu.Unlock()
 			}
 		}
 	case *event.WheelEvent:

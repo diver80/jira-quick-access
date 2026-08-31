@@ -18,7 +18,7 @@ static void ApplyDarwinWindowStyles(NSWindow *window) {
     [window setAcceptsMouseMovedEvents:YES];
     [window setOpaque:NO];
     [window setBackgroundColor:[NSColor clearColor]];
-    [window setHasShadow:YES];
+    [window setHasShadow:NO];
 
     // Completely borderless and transparent without any titlebar artifacts
     [window setStyleMask:(NSWindowStyleMaskBorderless | NSWindowStyleMaskFullSizeContentView)];
@@ -36,6 +36,10 @@ static void ApplyDarwinWindowStyles(NSWindow *window) {
 
     NSView *contentView = [window contentView];
     if (contentView) {
+        [contentView setWantsLayer:YES];
+        contentView.layer.backgroundColor = [[NSColor clearColor] CGColor];
+        contentView.layer.opaque = NO;
+
         NSTrackingArea *trackingArea = [[NSTrackingArea alloc] initWithRect:[contentView bounds]
             options:(NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect)
             owner:contentView
@@ -73,6 +77,7 @@ static void DarwinDockToRightEdge(int width, int height, int state) {
         [g_appWindow makeKeyAndOrderFront:nil];
 
         if (g_webView) {
+            // StateExpanded = 2
             if (state == 2) {
                 CGFloat webW = (CGFloat)width - 120.0;
                 CGFloat webH = (CGFloat)height - 20.0;
