@@ -474,7 +474,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	filteredIssues := v.getFilteredIssues()
 
 	// =========================================================================
-	// 1. STATE REST: Discrete macOS Dock Capsule with Status Percentage Edge Indicator
+	// 1. STATE REST: Discrete macOS Dock Capsule with 2:23:6 Proportional Gauges
 	// =========================================================================
 	if st == window.StateRest {
 		pillRect := geometry.NewRect(b.Min.X, b.Min.Y, w, h)
@@ -491,6 +491,20 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		usableH := h - 34 // Reserve 34px for bottom divider and settings icon
 		instSectionH := usableH / float32(instCount)
 
+		// Calculate maxCount across instances to scale proportions (e.g. 23)
+		maxCount := 1
+		for idx, inst := range instances {
+			c := 0
+			for _, iss := range allIssues {
+				if isIssueForInstance(iss, inst, idx) {
+					c++
+				}
+			}
+			if c > maxCount {
+				maxCount = c
+			}
+		}
+
 		for idx, inst := range instances {
 			secY := b.Min.Y + float32(5+float32(idx)*instSectionH)
 
@@ -506,7 +520,8 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			beaconColor := widget.RGBA8(56, 189, 248, 255) // Cyan (Avono)
 			beaconGlow := widget.RGBA8(56, 189, 248, 50)
 			inProgColor := widget.RGBA8(56, 189, 248, 255) // Light Cyan
-			todoColor := widget.RGBA8(14, 116, 144, 255)   // Darker Blue / Cyan
+			todoColor := widget.RGBA8(14, 116, 144, 255)   // Dark Blue / Cyan
+			trackColor := widget.RGBA8(56, 189, 248, 35)   // Dim Cyan Track
 			badgeBg := widget.RGBA8(24, 34, 52, 240)
 			badgeBorder := widget.RGBA8(56, 189, 248, 120)
 
@@ -515,6 +530,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				beaconGlow = widget.RGBA8(168, 85, 247, 50)
 				inProgColor = widget.RGBA8(192, 132, 252, 255) // Light Purple
 				todoColor = widget.RGBA8(107, 33, 168, 255)    // Darker Violet
+				trackColor = widget.RGBA8(168, 85, 247, 35)    // Dim Purple Track
 				badgeBg = widget.RGBA8(38, 26, 56, 240)
 				badgeBorder = widget.RGBA8(168, 85, 247, 120)
 			} else if idx == 2 {
@@ -522,6 +538,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				beaconGlow = widget.RGBA8(234, 179, 8, 50)
 				inProgColor = widget.RGBA8(250, 204, 21, 255) // Light Yellow/Amber
 				todoColor = widget.RGBA8(161, 98, 7, 255)     // Darker Amber
+				trackColor = widget.RGBA8(234, 179, 8, 35)    // Dim Amber Track
 				badgeBg = widget.RGBA8(48, 38, 20, 240)
 				badgeBorder = widget.RGBA8(234, 179, 8, 120)
 			} else if idx > 2 {
@@ -529,6 +546,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				beaconGlow = widget.RGBA8(34, 197, 94, 50)
 				inProgColor = widget.RGBA8(74, 222, 128, 255)
 				todoColor = widget.RGBA8(21, 128, 61, 255)
+				trackColor = widget.RGBA8(34, 197, 94, 35)
 				badgeBg = widget.RGBA8(20, 44, 30, 240)
 				badgeBorder = widget.RGBA8(34, 197, 94, 120)
 			}
@@ -538,14 +556,22 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			canvas.DrawCircle(beaconCenter, 5.5, beaconGlow)
 			canvas.DrawCircle(beaconCenter, 3.0, beaconColor)
 
-			// Proportional Status Percentage Indicator on Left Edge
+			// Proportional 2:23:6 Gauge Indicator on Left Edge
 			lineTopY := secY + 3
 			lineBottomY := secY + instSectionH - 4
 			lineTotalH := lineBottomY - lineTopY
 
-			if count == 0 {
-				canvas.DrawLine(geometry.Pt(b.Min.X+1, lineTopY), geometry.Pt(b.Min.X+1, lineBottomY), beaconColor, 1.5)
-			} else {
+			// 1. Draw background full track in subtle dim tone
+			canvas.DrawLine(geometry.Pt(b.Min.X+1, lineTopY), geometry.Pt(b.Min.X+1, lineBottomY), trackColor, 2.0)
+
+			// 2. Scale line height proportionally to maxCount (e.g. 2/23 vs 23/23 vs 6/23)
+			ratio := float32(count) / float32(maxCount)
+			fillH := ratio * lineTotalH
+			if count > 0 && fillH < 4.0 {
+				fillH = 4.0
+			}
+
+			if count > 0 {
 				inProgCount := 0
 				todoCount := 0
 				doneCount := 0
@@ -562,21 +588,21 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				}
 
 				curY := lineTopY
-				// In Progress segment (Lighter version of instance color)
+				// In Progress segment
 				if inProgCount > 0 {
-					segH := lineTotalH * (float32(inProgCount) / float32(count))
+					segH := fillH * (float32(inProgCount) / float32(count))
 					canvas.DrawLine(geometry.Pt(b.Min.X+1, curY), geometry.Pt(b.Min.X+1, curY+segH), inProgColor, 2.0)
 					curY += segH
 				}
-				// To Do segment (Darker version of instance color)
+				// To Do segment
 				if todoCount > 0 {
-					segH := lineTotalH * (float32(todoCount) / float32(count))
+					segH := fillH * (float32(todoCount) / float32(count))
 					canvas.DrawLine(geometry.Pt(b.Min.X+1, curY), geometry.Pt(b.Min.X+1, curY+segH), todoColor, 2.0)
 					curY += segH
 				}
-				// Done segment (Emerald Green)
+				// Done segment
 				if doneCount > 0 {
-					segH := lineTotalH * (float32(doneCount) / float32(count))
+					segH := fillH * (float32(doneCount) / float32(count))
 					canvas.DrawLine(geometry.Pt(b.Min.X+1, curY), geometry.Pt(b.Min.X+1, curY+segH), widget.RGBA8(34, 197, 94, 255), 2.0)
 				}
 			}
@@ -588,7 +614,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			countBox := geometry.NewRect(b.Min.X+3, secY+16, badgeW, badgeH)
 			canvas.DrawRoundRect(countBox, badgeBg, 4)
 			canvas.StrokeRoundRect(countBox, badgeBorder, 4, 1.0)
-			canvas.DrawText(countStr, geometry.NewRect(b.Min.X+3, secY+17, badgeW, badgeH-2), 10, widget.RGBA8(240, 246, 255, 255), true, widget.TextAlignCenter)
+			canvas.DrawText(countStr, geometry.NewRect(b.Min.X+3, secY+17, badgeW, badgeH-2), 10, widget.RGBA8(240, 245, 255, 255), true, widget.TextAlignCenter)
 
 			// Subtle Divider between instances
 			if idx < len(instances)-1 {

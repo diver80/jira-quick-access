@@ -38,10 +38,10 @@ static void MakeLayersTransparent(CALayer *layer) {
 static void ApplyDarwinWindowStyles(NSWindow *window) {
     if (!window) return;
 
-    // 1. Set style mask FIRST so macOS does not overwrite opacity/background
+    // 1. Set style mask FIRST
     [window setStyleMask:NSWindowStyleMaskBorderless];
 
-    // 2. Set transparency and non-opaque properties
+    // 2. Clear background and opacity on the NSWindow
     [window setAcceptsMouseMovedEvents:YES];
     [window setOpaque:NO];
     [window setBackgroundColor:[NSColor clearColor]];
@@ -56,9 +56,21 @@ static void ApplyDarwinWindowStyles(NSWindow *window) {
 
     [window setLevel:NSFloatingWindowLevel];
 
+    // 3. Clear background and opacity on contentView, superviews (NSThemeFrame), and all sublayers
     NSView *contentView = [window contentView];
     if (contentView) {
-        [contentView setWantsLayer:YES];
+        contentView.wantsLayer = YES;
+        contentView.layer.opaque = NO;
+        contentView.layer.backgroundColor = [[NSColor clearColor] CGColor];
+
+        NSView *superView = [contentView superview];
+        while (superView != nil) {
+            superView.wantsLayer = YES;
+            superView.layer.opaque = NO;
+            superView.layer.backgroundColor = [[NSColor clearColor] CGColor];
+            superView = [superView superview];
+        }
+
         MakeLayersTransparent([contentView layer]);
 
         NSTrackingArea *trackingArea = [[NSTrackingArea alloc] initWithRect:[contentView bounds]
