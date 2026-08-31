@@ -478,11 +478,11 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	// =========================================================================
 	if st == window.StateRest {
 		pillRect := geometry.NewRect(b.Min.X, b.Min.Y, w, h)
-		// Deep glass obsidian backdrop
-		canvas.DrawRoundRect(pillRect, widget.RGBA8(16, 22, 34, 240), 13)
+		// Deep obsidian glass backdrop
+		canvas.DrawRoundRect(pillRect, widget.RGBA8(16, 22, 34, 245), 13)
 		canvas.StrokeRoundRect(pillRect, widget.RGBA8(255, 255, 255, 45), 13, 1.0)
 		// Top specular highlight
-		canvas.DrawLine(geometry.Pt(b.Min.X+5, b.Min.Y+2), geometry.Pt(b.Min.X+w-5, b.Min.Y+2), widget.RGBA8(255, 255, 255, 100), 1.0)
+		canvas.DrawLine(geometry.Pt(b.Min.X+5, b.Min.Y+2), geometry.Pt(b.Min.X+w-5, b.Min.Y+2), widget.RGBA8(255, 255, 255, 110), 1.0)
 
 		instCount := len(instances)
 		if instCount == 0 {
@@ -500,22 +500,27 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				}
 			}
 
-			// Instance Beacon Core & Halo
+			// Instance Beacon Core & Radiant Glow
 			beaconCenter := geometry.Pt(b.Min.X+w/2, secY+6)
 			beaconColor := widget.RGBA8(56, 189, 248, 255) // Cyan (Avono)
-			beaconGlow := widget.RGBA8(56, 189, 248, 45)
+			beaconGlow := widget.RGBA8(56, 189, 248, 50)
 			if idx == 1 {
 				beaconColor = widget.RGBA8(168, 85, 247, 255) // Purple (Sandbox)
-				beaconGlow = widget.RGBA8(168, 85, 247, 45)
+				beaconGlow = widget.RGBA8(168, 85, 247, 50)
 			} else if idx == 2 {
 				beaconColor = widget.RGBA8(234, 179, 8, 255) // Amber (Sandbox)
-				beaconGlow = widget.RGBA8(234, 179, 8, 45)
+				beaconGlow = widget.RGBA8(234, 179, 8, 50)
 			} else if idx > 2 {
 				beaconColor = widget.RGBA8(34, 197, 94, 255) // Emerald
-				beaconGlow = widget.RGBA8(34, 197, 94, 45)
+				beaconGlow = widget.RGBA8(34, 197, 94, 50)
 			}
-			canvas.DrawCircle(beaconCenter, 5.0, beaconGlow)
+			canvas.DrawCircle(beaconCenter, 5.5, beaconGlow)
 			canvas.DrawCircle(beaconCenter, 3.0, beaconColor)
+
+			// Subtle fading accent line indicator on edge
+			accentLineTop := geometry.Pt(b.Min.X+1, secY+3)
+			accentLineBottom := geometry.Pt(b.Min.X+1, secY+instSectionH-4)
+			canvas.DrawLine(accentLineTop, accentLineBottom, beaconColor, 1.5)
 
 			// Compact Ticket Count Badge Pill
 			countStr := fmt.Sprintf("%d", count)
