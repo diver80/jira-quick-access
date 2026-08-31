@@ -18,7 +18,7 @@ import (
 )
 
 // AppView implements the 3-state edge architecture with multi-instance support & macOS Dock styling:
-// 1. Rest: Sleek discrete macOS Dock capsule with separate instance counts & dividers (26x180)
+// 1. Rest: Sleek discrete macOS Dock capsule with separate instance counts & dividers (26x210)
 // 2. Fan: Shingled vertical tabs down the edge with instant search & scroll indicator (Hover)
 // 3. Expanded: Full floating card / native mobile webview level with its tab (Click)
 type AppView struct {
@@ -192,7 +192,7 @@ func (v *AppView) getFilteredIssues() []jira.Issue {
 func (v *AppView) computeSize(st window.WindowState) (int, int) {
 	switch st {
 	case window.StateRest:
-		return 26, 180
+		return 26, 210
 
 	case window.StateFan:
 		issues := v.getFilteredIssues()
@@ -212,7 +212,7 @@ func (v *AppView) computeSize(st window.WindowState) (int, int) {
 	case window.StateExpanded:
 		return 760, 560
 	}
-	return 26, 180
+	return 26, 210
 }
 
 func (v *AppView) SetState(newState window.WindowState) {
@@ -455,7 +455,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		w = 26
 	}
 	if h <= 0 {
-		h = 180
+		h = 210
 	}
 
 	v.mu.Lock()
@@ -474,7 +474,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	filteredIssues := v.getFilteredIssues()
 
 	// =========================================================================
-	// 1. STATE REST: Discrete macOS Dock Capsule with Elegant Glass Badges
+	// 1. STATE REST: Discrete macOS Dock Capsule with Status Percentage Edge Indicator
 	// =========================================================================
 	if st == window.StateRest {
 		pillRect := geometry.NewRect(b.Min.X, b.Min.Y, w, h)
@@ -488,20 +488,22 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		if instCount == 0 {
 			instCount = 1
 		}
-		instSectionH := float32(144) / float32(instCount)
+		usableH := h - 34 // Reserve 34px for bottom divider and settings icon
+		instSectionH := usableH / float32(instCount)
 
 		for idx, inst := range instances {
-			secY := b.Min.Y + float32(6+float32(idx)*instSectionH)
+			secY := b.Min.Y + float32(5+float32(idx)*instSectionH)
 
-			count := 0
+			var instIssues []jira.Issue
 			for _, iss := range allIssues {
 				if isIssueForInstance(iss, inst, idx) {
-					count++
+					instIssues = append(instIssues, iss)
 				}
 			}
+			count := len(instIssues)
 
 			// Instance Beacon Core & Radiant Glow
-			beaconCenter := geometry.Pt(b.Min.X+w/2, secY+6)
+			beaconCenter := geometry.Pt(b.Min.X+w/2, secY+7)
 			beaconColor := widget.RGBA8(56, 189, 248, 255) // Cyan (Avono)
 			beaconGlow := widget.RGBA8(56, 189, 248, 50)
 			if idx == 1 {
@@ -517,16 +519,55 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			canvas.DrawCircle(beaconCenter, 5.5, beaconGlow)
 			canvas.DrawCircle(beaconCenter, 3.0, beaconColor)
 
-			// Subtle fading accent line indicator on edge
-			accentLineTop := geometry.Pt(b.Min.X+1, secY+3)
-			accentLineBottom := geometry.Pt(b.Min.X+1, secY+instSectionH-4)
-			canvas.DrawLine(accentLineTop, accentLineBottom, beaconColor, 1.5)
+			// Proportional Status Percentage Indicator on Left Edge
+			lineTopY := secY + 3
+			lineBottomY := secY + instSectionH - 4
+			lineTotalH := lineBottomY - lineTopY
+
+			if count == 0 {
+				canvas.DrawLine(geometry.Pt(b.Min.X+1, lineTopY), geometry.Pt(b.Min.X+1, lineBottomY), beaconColor, 1.5)
+			} else {
+				// Count status distribution: In Progress (Light Blue), To Do (Dark Blue), Done (Emerald)
+				inProgCount := 0
+				todoCount := 0
+				doneCount := 0
+				for _, iss := range instIssues {
+					cat := strings.ToLower(iss.Status.CategoryKey)
+					name := strings.ToLower(iss.Status.Name)
+					if cat == "indeterminate" || strings.Contains(name, "progress") || strings.Contains(name, "dev") {
+						inProgCount++
+					} else if cat == "done" || strings.Contains(name, "done") || strings.Contains(name, "closed") {
+						doneCount++
+					} else {
+						todoCount++
+					}
+				}
+
+				curY := lineTopY
+				// In Progress segment (Bright Cyan / Light Blue)
+				if inProgCount > 0 {
+					segH := lineTotalH * (float32(inProgCount) / float32(count))
+					canvas.DrawLine(geometry.Pt(b.Min.X+1, curY), geometry.Pt(b.Min.X+1, curY+segH), widget.RGBA8(56, 189, 248, 255), 2.0)
+					curY += segH
+				}
+				// To Do segment (Deep Royal Blue)
+				if todoCount > 0 {
+					segH := lineTotalH * (float32(todoCount) / float32(count))
+					canvas.DrawLine(geometry.Pt(b.Min.X+1, curY), geometry.Pt(b.Min.X+1, curY+segH), widget.RGBA8(79, 70, 229, 230), 2.0)
+					curY += segH
+				}
+				// Done segment (Emerald Green)
+				if doneCount > 0 {
+					segH := lineTotalH * (float32(doneCount) / float32(count))
+					canvas.DrawLine(geometry.Pt(b.Min.X+1, curY), geometry.Pt(b.Min.X+1, curY+segH), widget.RGBA8(34, 197, 94, 255), 2.0)
+				}
+			}
 
 			// Compact Ticket Count Badge Pill
 			countStr := fmt.Sprintf("%d", count)
 			badgeW := w - 6
 			badgeH := float32(17)
-			countBox := geometry.NewRect(b.Min.X+3, secY+14, badgeW, badgeH)
+			countBox := geometry.NewRect(b.Min.X+3, secY+16, badgeW, badgeH)
 			badgeBg := widget.RGBA8(24, 34, 52, 240)
 			badgeBorder := widget.RGBA8(56, 189, 248, 120)
 			if idx == 1 {
@@ -538,7 +579,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			}
 			canvas.DrawRoundRect(countBox, badgeBg, 4)
 			canvas.StrokeRoundRect(countBox, badgeBorder, 4, 1.0)
-			canvas.DrawText(countStr, geometry.NewRect(b.Min.X+3, secY+15, badgeW, badgeH-2), 10, widget.RGBA8(240, 246, 255, 255), true, widget.TextAlignCenter)
+			canvas.DrawText(countStr, geometry.NewRect(b.Min.X+3, secY+17, badgeW, badgeH-2), 10, widget.RGBA8(240, 246, 255, 255), true, widget.TextAlignCenter)
 
 			// Subtle Divider between instances
 			if idx < len(instances)-1 {
@@ -548,13 +589,13 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		}
 
 		// Divider before settings
-		dividerY := b.Min.Y + h - 26
+		dividerY := b.Min.Y + h - 28
 		canvas.DrawLine(geometry.Pt(b.Min.X+5, dividerY), geometry.Pt(b.Min.X+w-5, dividerY), widget.RGBA8(255, 255, 255, 45), 1.0)
 
-		// Settings Dot with Glow
-		settingsCenter := geometry.Pt(b.Min.X+w/2, b.Min.Y+h-13)
-		canvas.DrawCircle(settingsCenter, 5.0, widget.RGBA8(180, 200, 230, 40))
-		canvas.DrawCircle(settingsCenter, 3.0, widget.RGBA8(180, 200, 230, 220))
+		// Settings Icon (Gear/Dot) with clear visibility
+		settingsCenter := geometry.Pt(b.Min.X+w/2, b.Min.Y+h-14)
+		canvas.DrawCircle(settingsCenter, 6.0, widget.RGBA8(180, 200, 230, 40))
+		canvas.DrawCircle(settingsCenter, 3.5, widget.RGBA8(200, 220, 245, 240))
 		return
 	}
 
@@ -1047,14 +1088,15 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 
 	// REST STATE: Hovering specific instance or settings dot
 	if st == window.StateRest {
-		if pos.Y >= b.Min.Y+h-26 {
+		if pos.Y >= b.Min.Y+h-28 {
 			v.OpenSettings()
 			return true
 		}
 
 		if instCount > 0 {
-			instSectionH := float32(144) / float32(instCount)
-			instIdx := int((pos.Y - (b.Min.Y + 6)) / instSectionH)
+			usableH := h - 34
+			instSectionH := usableH / float32(instCount)
+			instIdx := int((pos.Y - (b.Min.Y + 5)) / instSectionH)
 			if instIdx < 0 {
 				instIdx = 0
 			}

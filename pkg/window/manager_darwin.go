@@ -34,16 +34,8 @@ static void ApplyDarwinWindowStyles(NSWindow *window) {
     [window setBackgroundColor:[NSColor clearColor]];
     [window setHasShadow:NO];
 
-    [window setTitleVisibility:NSWindowTitleHidden];
-    [window setTitlebarAppearsTransparent:YES];
-    [window setStyleMask:([window styleMask] | NSWindowStyleMaskFullSizeContentView)];
-
-    NSButton *closeBtn = [window standardWindowButton:NSWindowCloseButton];
-    if (closeBtn) [closeBtn setHidden:YES];
-    NSButton *minBtn = [window standardWindowButton:NSWindowMiniaturizeButton];
-    if (minBtn) [minBtn setHidden:YES];
-    NSButton *zoomBtn = [window standardWindowButton:NSWindowZoomButton];
-    if (zoomBtn) [zoomBtn setHidden:YES];
+    // Pure borderless window eliminates all titlebars, borders and corner artifacts
+    [window setStyleMask:NSWindowStyleMaskBorderless];
 
     NSWindowCollectionBehavior behavior =
         NSWindowCollectionBehaviorCanJoinAllSpaces |
