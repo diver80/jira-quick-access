@@ -18,7 +18,7 @@ import (
 )
 
 // AppView implements the 3-state edge architecture with multi-instance support & macOS Dock styling:
-// 1. Rest: Sleek discrete macOS Dock capsule with separate instance counts & dividers (36x220)
+// 1. Rest: Sleek discrete macOS Dock capsule with separate instance counts & dividers (26x180)
 // 2. Fan: Shingled vertical tabs down the edge with instant search & scroll indicator (Hover)
 // 3. Expanded: Full floating card / native mobile webview level with its tab (Click)
 type AppView struct {
@@ -192,7 +192,7 @@ func (v *AppView) getFilteredIssues() []jira.Issue {
 func (v *AppView) computeSize(st window.WindowState) (int, int) {
 	switch st {
 	case window.StateRest:
-		return 36, 220
+		return 26, 180
 
 	case window.StateFan:
 		issues := v.getFilteredIssues()
@@ -212,7 +212,7 @@ func (v *AppView) computeSize(st window.WindowState) (int, int) {
 	case window.StateExpanded:
 		return 760, 560
 	}
-	return 36, 220
+	return 26, 180
 }
 
 func (v *AppView) SetState(newState window.WindowState) {
@@ -452,10 +452,10 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	w := b.Width()
 	h := b.Height()
 	if w <= 0 {
-		w = 36
+		w = 26
 	}
 	if h <= 0 {
-		h = 220
+		h = 180
 	}
 
 	v.mu.Lock()
@@ -474,24 +474,25 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	filteredIssues := v.getFilteredIssues()
 
 	// =========================================================================
-	// 1. STATE REST: Multi-Instance macOS Edge Capsule with Separators & Counts
+	// 1. STATE REST: Discrete macOS Dock Capsule with Elegant Glass Badges
 	// =========================================================================
 	if st == window.StateRest {
 		pillRect := geometry.NewRect(b.Min.X, b.Min.Y, w, h)
-		canvas.DrawRoundRect(pillRect, widget.RGBA8(18, 24, 38, 245), 14)
-		canvas.StrokeRoundRect(pillRect, widget.RGBA8(255, 255, 255, 80), 14, 1.0)
-		canvas.DrawLine(geometry.Pt(b.Min.X+6, b.Min.Y+3), geometry.Pt(b.Min.X+w-6, b.Min.Y+3), widget.RGBA8(255, 255, 255, 140), 1.0)
+		// Deep glass obsidian backdrop
+		canvas.DrawRoundRect(pillRect, widget.RGBA8(16, 22, 34, 240), 13)
+		canvas.StrokeRoundRect(pillRect, widget.RGBA8(255, 255, 255, 45), 13, 1.0)
+		// Top specular highlight
+		canvas.DrawLine(geometry.Pt(b.Min.X+5, b.Min.Y+2), geometry.Pt(b.Min.X+w-5, b.Min.Y+2), widget.RGBA8(255, 255, 255, 100), 1.0)
 
 		instCount := len(instances)
 		if instCount == 0 {
 			instCount = 1
 		}
-		instSectionH := float32(180) / float32(instCount)
+		instSectionH := float32(144) / float32(instCount)
 
 		for idx, inst := range instances {
-			secY := b.Min.Y + float32(8+float32(idx)*instSectionH)
+			secY := b.Min.Y + float32(6+float32(idx)*instSectionH)
 
-			// Count issues for this specific instance
 			count := 0
 			for _, iss := range allIssues {
 				if isIssueForInstance(iss, inst, idx) {
@@ -499,44 +500,56 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				}
 			}
 
-			// Instance Indicator Beacon Dot
+			// Instance Beacon Core & Halo
 			beaconCenter := geometry.Pt(b.Min.X+w/2, secY+6)
 			beaconColor := widget.RGBA8(56, 189, 248, 255) // Cyan (Avono)
+			beaconGlow := widget.RGBA8(56, 189, 248, 45)
 			if idx == 1 {
 				beaconColor = widget.RGBA8(168, 85, 247, 255) // Purple (Sandbox)
+				beaconGlow = widget.RGBA8(168, 85, 247, 45)
 			} else if idx == 2 {
 				beaconColor = widget.RGBA8(234, 179, 8, 255) // Amber (Sandbox)
+				beaconGlow = widget.RGBA8(234, 179, 8, 45)
 			} else if idx > 2 {
 				beaconColor = widget.RGBA8(34, 197, 94, 255) // Emerald
+				beaconGlow = widget.RGBA8(34, 197, 94, 45)
 			}
-			canvas.DrawCircle(beaconCenter, 4.0, beaconColor)
+			canvas.DrawCircle(beaconCenter, 5.0, beaconGlow)
+			canvas.DrawCircle(beaconCenter, 3.0, beaconColor)
 
-			// Ticket Count Badge Box
+			// Compact Ticket Count Badge Pill
 			countStr := fmt.Sprintf("%d", count)
-			countBox := geometry.NewRect(b.Min.X+4, secY+16, w-8, 20)
-			badgeBg := widget.RGBA8(59, 130, 246, 220)
+			badgeW := w - 6
+			badgeH := float32(17)
+			countBox := geometry.NewRect(b.Min.X+3, secY+14, badgeW, badgeH)
+			badgeBg := widget.RGBA8(24, 34, 52, 240)
+			badgeBorder := widget.RGBA8(56, 189, 248, 120)
 			if idx == 1 {
-				badgeBg = widget.RGBA8(147, 51, 234, 220)
+				badgeBg = widget.RGBA8(38, 26, 56, 240)
+				badgeBorder = widget.RGBA8(168, 85, 247, 120)
 			} else if idx == 2 {
-				badgeBg = widget.RGBA8(202, 138, 4, 220)
+				badgeBg = widget.RGBA8(48, 38, 20, 240)
+				badgeBorder = widget.RGBA8(234, 179, 8, 120)
 			}
-			canvas.DrawRoundRect(countBox, badgeBg, 5)
-			canvas.DrawText(countStr, geometry.NewRect(b.Min.X+4, secY+18, w-8, 16), 11, widget.RGBA8(255, 255, 255, 255), true, widget.TextAlignCenter)
+			canvas.DrawRoundRect(countBox, badgeBg, 4)
+			canvas.StrokeRoundRect(countBox, badgeBorder, 4, 1.0)
+			canvas.DrawText(countStr, geometry.NewRect(b.Min.X+3, secY+15, badgeW, badgeH-2), 10, widget.RGBA8(240, 246, 255, 255), true, widget.TextAlignCenter)
 
-			// Separator line between instances
+			// Subtle Divider between instances
 			if idx < len(instances)-1 {
 				sepY := secY + instSectionH - 2
-				canvas.DrawLine(geometry.Pt(b.Min.X+6, sepY), geometry.Pt(b.Min.X+w-6, sepY), widget.RGBA8(255, 255, 255, 55), 1.0)
+				canvas.DrawLine(geometry.Pt(b.Min.X+5, sepY), geometry.Pt(b.Min.X+w-5, sepY), widget.RGBA8(255, 255, 255, 30), 1.0)
 			}
 		}
 
 		// Divider before settings
-		dividerY := b.Min.Y + h - 28
-		canvas.DrawLine(geometry.Pt(b.Min.X+6, dividerY), geometry.Pt(b.Min.X+w-6, dividerY), widget.RGBA8(255, 255, 255, 70), 1.0)
+		dividerY := b.Min.Y + h - 26
+		canvas.DrawLine(geometry.Pt(b.Min.X+5, dividerY), geometry.Pt(b.Min.X+w-5, dividerY), widget.RGBA8(255, 255, 255, 45), 1.0)
 
-		// Settings Dot
-		settingsCenter := geometry.Pt(b.Min.X+w/2, b.Min.Y+h-14)
-		canvas.DrawCircle(settingsCenter, 4.0, widget.RGBA8(180, 200, 230, 230))
+		// Settings Dot with Glow
+		settingsCenter := geometry.Pt(b.Min.X+w/2, b.Min.Y+h-13)
+		canvas.DrawCircle(settingsCenter, 5.0, widget.RGBA8(180, 200, 230, 40))
+		canvas.DrawCircle(settingsCenter, 3.0, widget.RGBA8(180, 200, 230, 220))
 		return
 	}
 
@@ -1023,14 +1036,14 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 
 	// REST STATE: Hovering specific instance or settings dot
 	if st == window.StateRest {
-		if pos.Y >= b.Min.Y+h-28 {
+		if pos.Y >= b.Min.Y+h-26 {
 			v.OpenSettings()
 			return true
 		}
 
 		if instCount > 0 {
-			instSectionH := float32(180) / float32(instCount)
-			instIdx := int((pos.Y - (b.Min.Y + 8)) / instSectionH)
+			instSectionH := float32(144) / float32(instCount)
+			instIdx := int((pos.Y - (b.Min.Y + 6)) / instSectionH)
 			if instIdx < 0 {
 				instIdx = 0
 			}

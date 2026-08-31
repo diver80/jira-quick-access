@@ -24,8 +24,8 @@ func main() {
 	// 3. Initialize Gogpu engine
 	gogpuApp := gogpu.NewApp(gogpu.Config{
 		Title:  "",
-		Width:  36,
-		Height: 220,
+		Width:  26,
+		Height: 180,
 	})
 
 	// 4. Create UI Application connected to the GPU Window & Event Pipeline
@@ -52,7 +52,7 @@ func main() {
 		for _, delay := range []time.Duration{80 * time.Millisecond, 250 * time.Millisecond, 600 * time.Millisecond} {
 			time.Sleep(delay)
 			if window.DefaultManager != nil {
-				_ = window.DefaultManager.InitEdgeRail(36, 220)
+				_ = window.DefaultManager.InitEdgeRail(26, 180)
 			}
 			gogpuApp.RequestRedraw()
 		}
