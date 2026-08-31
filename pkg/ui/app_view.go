@@ -502,20 +502,39 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			}
 			count := len(instIssues)
 
-			// Instance Beacon Core & Radiant Glow
-			beaconCenter := geometry.Pt(b.Min.X+w/2, secY+7)
+			// Distinct colors per instance
 			beaconColor := widget.RGBA8(56, 189, 248, 255) // Cyan (Avono)
 			beaconGlow := widget.RGBA8(56, 189, 248, 50)
+			inProgColor := widget.RGBA8(56, 189, 248, 255) // Light Cyan
+			todoColor := widget.RGBA8(14, 116, 144, 255)   // Darker Blue / Cyan
+			badgeBg := widget.RGBA8(24, 34, 52, 240)
+			badgeBorder := widget.RGBA8(56, 189, 248, 120)
+
 			if idx == 1 {
 				beaconColor = widget.RGBA8(168, 85, 247, 255) // Purple (Sandbox)
 				beaconGlow = widget.RGBA8(168, 85, 247, 50)
+				inProgColor = widget.RGBA8(192, 132, 252, 255) // Light Purple
+				todoColor = widget.RGBA8(107, 33, 168, 255)    // Darker Violet
+				badgeBg = widget.RGBA8(38, 26, 56, 240)
+				badgeBorder = widget.RGBA8(168, 85, 247, 120)
 			} else if idx == 2 {
 				beaconColor = widget.RGBA8(234, 179, 8, 255) // Amber (Sandbox)
 				beaconGlow = widget.RGBA8(234, 179, 8, 50)
+				inProgColor = widget.RGBA8(250, 204, 21, 255) // Light Yellow/Amber
+				todoColor = widget.RGBA8(161, 98, 7, 255)     // Darker Amber
+				badgeBg = widget.RGBA8(48, 38, 20, 240)
+				badgeBorder = widget.RGBA8(234, 179, 8, 120)
 			} else if idx > 2 {
 				beaconColor = widget.RGBA8(34, 197, 94, 255) // Emerald
 				beaconGlow = widget.RGBA8(34, 197, 94, 50)
+				inProgColor = widget.RGBA8(74, 222, 128, 255)
+				todoColor = widget.RGBA8(21, 128, 61, 255)
+				badgeBg = widget.RGBA8(20, 44, 30, 240)
+				badgeBorder = widget.RGBA8(34, 197, 94, 120)
 			}
+
+			// Instance Beacon Core & Radiant Glow
+			beaconCenter := geometry.Pt(b.Min.X+w/2, secY+7)
 			canvas.DrawCircle(beaconCenter, 5.5, beaconGlow)
 			canvas.DrawCircle(beaconCenter, 3.0, beaconColor)
 
@@ -527,7 +546,6 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			if count == 0 {
 				canvas.DrawLine(geometry.Pt(b.Min.X+1, lineTopY), geometry.Pt(b.Min.X+1, lineBottomY), beaconColor, 1.5)
 			} else {
-				// Count status distribution: In Progress (Light Blue), To Do (Dark Blue), Done (Emerald)
 				inProgCount := 0
 				todoCount := 0
 				doneCount := 0
@@ -544,16 +562,16 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				}
 
 				curY := lineTopY
-				// In Progress segment (Bright Cyan / Light Blue)
+				// In Progress segment (Lighter version of instance color)
 				if inProgCount > 0 {
 					segH := lineTotalH * (float32(inProgCount) / float32(count))
-					canvas.DrawLine(geometry.Pt(b.Min.X+1, curY), geometry.Pt(b.Min.X+1, curY+segH), widget.RGBA8(56, 189, 248, 255), 2.0)
+					canvas.DrawLine(geometry.Pt(b.Min.X+1, curY), geometry.Pt(b.Min.X+1, curY+segH), inProgColor, 2.0)
 					curY += segH
 				}
-				// To Do segment (Deep Royal Blue)
+				// To Do segment (Darker version of instance color)
 				if todoCount > 0 {
 					segH := lineTotalH * (float32(todoCount) / float32(count))
-					canvas.DrawLine(geometry.Pt(b.Min.X+1, curY), geometry.Pt(b.Min.X+1, curY+segH), widget.RGBA8(79, 70, 229, 230), 2.0)
+					canvas.DrawLine(geometry.Pt(b.Min.X+1, curY), geometry.Pt(b.Min.X+1, curY+segH), todoColor, 2.0)
 					curY += segH
 				}
 				// Done segment (Emerald Green)
@@ -568,15 +586,6 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			badgeW := w - 6
 			badgeH := float32(17)
 			countBox := geometry.NewRect(b.Min.X+3, secY+16, badgeW, badgeH)
-			badgeBg := widget.RGBA8(24, 34, 52, 240)
-			badgeBorder := widget.RGBA8(56, 189, 248, 120)
-			if idx == 1 {
-				badgeBg = widget.RGBA8(38, 26, 56, 240)
-				badgeBorder = widget.RGBA8(168, 85, 247, 120)
-			} else if idx == 2 {
-				badgeBg = widget.RGBA8(48, 38, 20, 240)
-				badgeBorder = widget.RGBA8(234, 179, 8, 120)
-			}
 			canvas.DrawRoundRect(countBox, badgeBg, 4)
 			canvas.StrokeRoundRect(countBox, badgeBorder, 4, 1.0)
 			canvas.DrawText(countStr, geometry.NewRect(b.Min.X+3, secY+17, badgeW, badgeH-2), 10, widget.RGBA8(240, 246, 255, 255), true, widget.TextAlignCenter)
@@ -592,7 +601,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		dividerY := b.Min.Y + h - 28
 		canvas.DrawLine(geometry.Pt(b.Min.X+5, dividerY), geometry.Pt(b.Min.X+w-5, dividerY), widget.RGBA8(255, 255, 255, 45), 1.0)
 
-		// Settings Icon (Gear/Dot) with clear visibility
+		// Settings Icon with clear visibility
 		settingsCenter := geometry.Pt(b.Min.X+w/2, b.Min.Y+h-14)
 		canvas.DrawCircle(settingsCenter, 6.0, widget.RGBA8(180, 200, 230, 40))
 		canvas.DrawCircle(settingsCenter, 3.5, widget.RGBA8(200, 220, 245, 240))

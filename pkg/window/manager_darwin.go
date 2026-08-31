@@ -26,16 +26,26 @@ package window
 static NSWindow *g_appWindow = nil;
 static WKWebView *g_ticketWebView = nil;
 
+static void MakeLayersTransparent(CALayer *layer) {
+    if (!layer) return;
+    layer.opaque = NO;
+    layer.backgroundColor = [[NSColor clearColor] CGColor];
+    for (CALayer *sub in layer.sublayers) {
+        MakeLayersTransparent(sub);
+    }
+}
+
 static void ApplyDarwinWindowStyles(NSWindow *window) {
     if (!window) return;
 
+    // 1. Set style mask FIRST so macOS does not overwrite opacity/background
+    [window setStyleMask:NSWindowStyleMaskBorderless];
+
+    // 2. Set transparency and non-opaque properties
     [window setAcceptsMouseMovedEvents:YES];
     [window setOpaque:NO];
     [window setBackgroundColor:[NSColor clearColor]];
     [window setHasShadow:NO];
-
-    // Pure borderless window eliminates all titlebars, borders and corner artifacts
-    [window setStyleMask:NSWindowStyleMaskBorderless];
 
     NSWindowCollectionBehavior behavior =
         NSWindowCollectionBehaviorCanJoinAllSpaces |
@@ -49,13 +59,7 @@ static void ApplyDarwinWindowStyles(NSWindow *window) {
     NSView *contentView = [window contentView];
     if (contentView) {
         [contentView setWantsLayer:YES];
-        contentView.layer.opaque = NO;
-        contentView.layer.backgroundColor = [[NSColor clearColor] CGColor];
-
-        for (CALayer *layer in contentView.layer.sublayers) {
-            layer.opaque = NO;
-            layer.backgroundColor = [[NSColor clearColor] CGColor];
-        }
+        MakeLayersTransparent([contentView layer]);
 
         NSTrackingArea *trackingArea = [[NSTrackingArea alloc] initWithRect:[contentView bounds]
             options:(NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect)
