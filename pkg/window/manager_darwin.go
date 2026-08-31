@@ -1,16 +1,30 @@
-//go:build darwin
+//go:build darwin && cgo
 
 package window
 
 /*
 #cgo CFLAGS: -x objective-c
-#cgo LDFLAGS: -framework Cocoa -framework WebKit
+#cgo LDFLAGS: -framework Cocoa -framework WebKit -framework QuartzCore
+#include <Cocoa/Cocoa.h>
+#include <WebKit/WebKit.h>
+#include <QuartzCore/QuartzCore.h>
+#include <dispatch/dispatch.h>
 
-#import <Cocoa/Cocoa.h>
-#import <WebKit/WebKit.h>
+// Allow borderless HUD window to become key and receive text input
+@interface NSWindow (AllowKeyWindow)
+@end
+
+@implementation NSWindow (AllowKeyWindow)
+- (BOOL)canBecomeKeyWindow {
+    return YES;
+}
+- (BOOL)canBecomeMainWindow {
+    return YES;
+}
+@end
 
 static NSWindow *g_appWindow = nil;
-static WKWebView *g_webView = nil;
+static WKWebView *g_ticketWebView = nil;
 
 static void ApplyDarwinWindowStyles(NSWindow *window) {
     if (!window) return;
@@ -20,10 +34,16 @@ static void ApplyDarwinWindowStyles(NSWindow *window) {
     [window setBackgroundColor:[NSColor clearColor]];
     [window setHasShadow:NO];
 
-    // Completely borderless and transparent without any titlebar artifacts
-    [window setStyleMask:(NSWindowStyleMaskBorderless | NSWindowStyleMaskFullSizeContentView)];
     [window setTitleVisibility:NSWindowTitleHidden];
     [window setTitlebarAppearsTransparent:YES];
+    [window setStyleMask:([window styleMask] | NSWindowStyleMaskFullSizeContentView)];
+
+    NSButton *closeBtn = [window standardWindowButton:NSWindowCloseButton];
+    if (closeBtn) [closeBtn setHidden:YES];
+    NSButton *minBtn = [window standardWindowButton:NSWindowMiniaturizeButton];
+    if (minBtn) [minBtn setHidden:YES];
+    NSButton *zoomBtn = [window standardWindowButton:NSWindowZoomButton];
+    if (zoomBtn) [zoomBtn setHidden:YES];
 
     NSWindowCollectionBehavior behavior =
         NSWindowCollectionBehaviorCanJoinAllSpaces |
@@ -37,8 +57,13 @@ static void ApplyDarwinWindowStyles(NSWindow *window) {
     NSView *contentView = [window contentView];
     if (contentView) {
         [contentView setWantsLayer:YES];
-        contentView.layer.backgroundColor = [[NSColor clearColor] CGColor];
         contentView.layer.opaque = NO;
+        contentView.layer.backgroundColor = [[NSColor clearColor] CGColor];
+
+        for (CALayer *layer in contentView.layer.sublayers) {
+            layer.opaque = NO;
+            layer.backgroundColor = [[NSColor clearColor] CGColor];
+        }
 
         NSTrackingArea *trackingArea = [[NSTrackingArea alloc] initWithRect:[contentView bounds]
             options:(NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect)
@@ -52,106 +77,103 @@ static void DarwinDockToRightEdge(int width, int height, int state) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!g_appWindow) {
             NSArray *windows = [NSApp windows];
-            for (NSWindow *w in windows) {
-                if ([w isVisible] || [windows count] == 1) {
-                    g_appWindow = w;
-                    break;
-                }
+            if ([windows count] > 0) {
+                g_appWindow = [windows objectAtIndex:0];
+                ApplyDarwinWindowStyles(g_appWindow);
             }
         }
         if (!g_appWindow) return;
 
         ApplyDarwinWindowStyles(g_appWindow);
 
-        NSScreen *targetScreen = [g_appWindow screen];
-        if (!targetScreen) {
-            targetScreen = [NSScreen mainScreen];
+        NSScreen *screen = [g_appWindow screen];
+        if (!screen) {
+            screen = [NSScreen mainScreen];
+        }
+        if (!screen && [[NSScreen screens] count] > 0) {
+            screen = [[NSScreen screens] objectAtIndex:0];
         }
 
-        NSRect screenFrame = [targetScreen frame];
+        NSRect screenFrame = NSMakeRect(0, 0, 1440, 900);
+        if (screen) {
+            screenFrame = [screen visibleFrame];
+            if (screenFrame.size.width <= 0 || screenFrame.size.height <= 0) {
+                screenFrame = [screen frame];
+            }
+        }
+
         CGFloat x = screenFrame.origin.x + screenFrame.size.width - (CGFloat)width;
         CGFloat y = screenFrame.origin.y + (screenFrame.size.height - (CGFloat)height) / 2.0;
 
         NSRect frame = NSMakeRect(x, y, (CGFloat)width, (CGFloat)height);
         [g_appWindow setFrame:frame display:YES animate:NO];
         [g_appWindow makeKeyAndOrderFront:nil];
-
-        if (g_webView) {
-            // StateExpanded = 2
-            if (state == 2) {
-                CGFloat webW = (CGFloat)width - 120.0;
-                CGFloat webH = (CGFloat)height - 20.0;
-                [g_webView setFrame:NSMakeRect(10, 10, webW, webH)];
-                [g_webView setHidden:NO];
-            } else {
-                [g_webView setHidden:YES];
-            }
-        }
     });
 }
 
-static void DarwinInitMobileWebView() {
+static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!g_appWindow) {
             NSArray *windows = [NSApp windows];
-            for (NSWindow *w in windows) {
-                if ([w isVisible] || [windows count] == 1) {
-                    g_appWindow = w;
-                    break;
-                }
+            if ([windows count] > 0) {
+                g_appWindow = [windows objectAtIndex:0];
             }
         }
-        if (!g_appWindow || g_webView) return;
 
-        WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
-        g_webView = [[WKWebView alloc] initWithFrame:NSMakeRect(10, 10, 600, 500) configuration:config];
-        [g_webView setHidden:YES];
-        [g_webView setValue:@NO forKey:@"drawsBackground"];
-
-        [[g_appWindow contentView] addSubview:g_webView];
-    });
-}
-
-static void DarwinSetWebViewVisible(int visible, int width, int height) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (!g_webView) return;
-        if (visible) {
-            CGFloat webW = (CGFloat)width - 120.0;
-            CGFloat webH = (CGFloat)height - 20.0;
-            [g_webView setFrame:NSMakeRect(10, 10, webW, webH)];
-            [g_webView setHidden:NO];
+        if (visible != 0) {
+            if (!g_ticketWebView && g_appWindow) {
+                NSView *contentView = [g_appWindow contentView];
+                if (contentView) {
+                    WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
+                    g_ticketWebView = [[WKWebView alloc] initWithFrame:NSMakeRect(8, 8, (CGFloat)(w-118), (CGFloat)(h-16)) configuration:config];
+                    [g_ticketWebView setWantsLayer:YES];
+                    [g_ticketWebView.layer setCornerRadius:14.0];
+                    [g_ticketWebView.layer setMasksToBounds:YES];
+                    [contentView addSubview:g_ticketWebView];
+                }
+            }
+            if (g_ticketWebView) {
+                CGFloat cardW = (CGFloat)(w - 118);
+                CGFloat cardH = (CGFloat)(h - 16);
+                [g_ticketWebView setFrame:NSMakeRect(8, 8, cardW, cardH)];
+                [g_ticketWebView setHidden:NO];
+            }
+            if (g_appWindow) {
+                [g_appWindow makeKeyAndOrderFront:nil];
+            }
         } else {
-            [g_webView setHidden:YES];
+            if (g_ticketWebView) {
+                [g_ticketWebView setHidden:YES];
+            }
         }
     });
 }
 
-static void DarwinLoadWebViewURL(const char *urlStr) {
+static void DarwinLoadMobileTicketView(const char *urlStr) {
+    if (!urlStr) return;
+    NSString *nsStr = [NSString stringWithUTF8String:urlStr];
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!g_webView) return;
-        NSString *nsUrlStr = [NSString stringWithUTF8String:urlStr];
-        NSURL *url = [NSURL URLWithString:nsUrlStr];
+        if (!g_ticketWebView) return;
+        NSURL *url = [NSURL URLWithString:nsStr];
         if (url) {
             NSURLRequest *req = [NSURLRequest requestWithURL:url];
-            [g_webView loadRequest:req];
+            [g_ticketWebView loadRequest:req];
         }
     });
 }
 
-static void DarwinLoadWebViewHTML(const char *htmlStr, const char *baseURLStr) {
+static void DarwinLoadMobileTicketHTML(const char *htmlStr, const char *baseURLStr) {
+    if (!htmlStr) return;
+    NSString *nsHtml = [NSString stringWithUTF8String:htmlStr];
+    NSString *nsBase = baseURLStr ? [NSString stringWithUTF8String:baseURLStr] : nil;
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!g_webView) return;
-        NSString *nsHtml = [NSString stringWithUTF8String:htmlStr];
-        NSURL *baseURL = nil;
-        if (baseURLStr && strlen(baseURLStr) > 0) {
-            baseURL = [NSURL URLWithString:[NSString stringWithUTF8String:baseURLStr]];
-        }
-        [g_webView loadHTMLString:nsHtml baseURL:baseURL];
+        if (!g_ticketWebView) return;
+        NSURL *baseURL = nsBase ? [NSURL URLWithString:nsBase] : nil;
+        [g_ticketWebView loadHTMLString:nsHtml baseURL:baseURL];
     });
 }
 */
 import "C"
-
 import (
 	"unsafe"
 )
@@ -161,20 +183,21 @@ type DarwinManager struct {
 }
 
 func init() {
-	DefaultManager = &DarwinManager{
-		state: StateRest,
+	if DefaultManager == nil {
+		DefaultManager = &DarwinManager{
+			state: StateRest,
+		}
 	}
 }
 
 func (m *DarwinManager) InitEdgeRail(width, height int) error {
-	C.DarwinInitMobileWebView()
-	C.DarwinDockToRightEdge(C.int(width), C.int(height), C.int(0))
+	m.SetState(StateRest, width, height)
 	return nil
 }
 
 func (m *DarwinManager) SetState(state WindowState, width, height int) {
 	m.state = state
-	C.DarwinDockToRightEdge(C.int(width), C.int(height), C.int(state))
+	m.DockToRightEdge(width, height)
 }
 
 func (m *DarwinManager) DockToRightEdge(width, height int) {
@@ -182,28 +205,30 @@ func (m *DarwinManager) DockToRightEdge(width, height int) {
 }
 
 func (m *DarwinManager) OpenTicketURL(url string) error {
-	LoadMobileTicketView(url)
-	return nil
+	return OpenURL(url)
 }
 
 func SetMobileWebViewVisible(visible bool, width, height int) {
-	v := 0
+	var v C.int = 0
 	if visible {
 		v = 1
 	}
-	C.DarwinSetWebViewVisible(C.int(v), C.int(width), C.int(height))
+	C.DarwinSetMobileWebViewVisible(v, C.int(width), C.int(height))
 }
 
 func LoadMobileTicketView(url string) {
-	cStr := C.CString(url)
-	defer C.free(unsafe.Pointer(cStr))
-	C.DarwinLoadWebViewURL(cStr)
+	cURL := C.CString(url)
+	defer C.free(unsafe.Pointer(cURL))
+	C.DarwinLoadMobileTicketView(cURL)
 }
 
 func LoadMobileTicketHTML(html string, baseURL string) {
-	cHtml := C.CString(html)
-	defer C.free(unsafe.Pointer(cHtml))
-	cBase := C.CString(baseURL)
-	defer C.free(unsafe.Pointer(cBase))
-	C.DarwinLoadWebViewHTML(cHtml, cBase)
+	cHTML := C.CString(html)
+	defer C.free(unsafe.Pointer(cHTML))
+	var cBase *C.char
+	if baseURL != "" {
+		cBase = C.CString(baseURL)
+		defer C.free(unsafe.Pointer(cBase))
+	}
+	C.DarwinLoadMobileTicketHTML(cHTML, cBase)
 }
