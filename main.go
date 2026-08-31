@@ -21,11 +21,13 @@ func main() {
 	// 2. Initialize Jira multi-tenant REST client
 	client := jira.NewClient(cfg)
 
-	// 3. Initialize Gogpu engine
+	// 3. Initialize Gogpu engine with Native Transparency & Frameless styling
 	gogpuApp := gogpu.NewApp(gogpu.Config{
-		Title:  "",
-		Width:  26,
-		Height: 210,
+		Title:       "",
+		Width:       26,
+		Height:      210,
+		Frameless:   true,
+		Transparent: true,
 	})
 
 	// 4. Create UI Application connected to the GPU Window & Event Pipeline
@@ -36,11 +38,15 @@ func main() {
 		app.WithRenderMode(app.RenderModeFrameworkManaged),
 	)
 
-	// 5. Initialize the Edge Rail HUD Root View
+	// 5. Initialize the Edge Rail HUD Root View with resize & redraw hooks
 	rootView := ui.NewAppView(
 		cfg,
 		client,
 		func() {
+			gogpuApp.RequestRedraw()
+		},
+		func(w, h int) {
+			gogpuApp.RequestSize(w, h)
 			gogpuApp.RequestRedraw()
 		},
 	)
@@ -54,6 +60,7 @@ func main() {
 			if window.DefaultManager != nil {
 				_ = window.DefaultManager.InitEdgeRail(26, 210)
 			}
+			gogpuApp.RequestSize(26, 210)
 			gogpuApp.RequestRedraw()
 		}
 
@@ -66,7 +73,7 @@ func main() {
 		}
 	}()
 
-	fmt.Println("🚀 Jira Quick Access (Edge Rail HUD) running in Rest state...")
+	fmt.Println("🚀 Jira Quick Access (Edge Rail HUD) running with transparent GPU canvas...")
 
 	// 7. Run GPU desktop pipeline
 	if err := desktop.Run(gogpuApp, uiApp); err != nil {

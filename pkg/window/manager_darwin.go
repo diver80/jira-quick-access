@@ -56,7 +56,7 @@ static void ApplyDarwinWindowStyles(NSWindow *window) {
 
     [window setLevel:NSFloatingWindowLevel];
 
-    // 3. Clear background and opacity on contentView, superviews (NSThemeFrame), and all sublayers
+    // 3. Clear background and opacity on contentView, superviews, and layers
     NSView *contentView = [window contentView];
     if (contentView) {
         contentView.wantsLayer = YES;
@@ -119,6 +119,17 @@ static void DarwinDockToRightEdge(int width, int height, int state) {
     });
 }
 
+static NSString *const kHideJiraHeaderScript =
+    @"var css = 'header, #ak-jira-navigation, nav[aria-label=\"Global\"], "
+    @"[data-testid=\"GlobalNavigation\"], [data-test-id=\"global-pages.header\"], "
+    @"[data-testid=\"navigation-apps-sidebar\"], [data-testid=\"app-navigation\"], "
+    @"[data-testid=\"NavigationHeader\"] { display: none !important; } "
+    @"body, #ak-main-content, #jira-frontend, #content { margin-top: 0 !important; padding-top: 0 !important; }'; "
+    @"var style = document.createElement('style'); "
+    @"style.type = 'text/css'; "
+    @"style.appendChild(document.createTextNode(css)); "
+    @"(document.head || document.documentElement).appendChild(style);";
+
 static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!g_appWindow) {
@@ -133,6 +144,13 @@ static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
                 NSView *contentView = [g_appWindow contentView];
                 if (contentView) {
                     WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
+                    WKUserContentController *userContent = [[WKUserContentController alloc] init];
+                    WKUserScript *script = [[WKUserScript alloc] initWithSource:kHideJiraHeaderScript
+                                                                  injectionTime:WKUserScriptInjectionTimeAtDocumentEnd
+                                                               forMainFrameOnly:NO];
+                    [userContent addUserScript:script];
+                    config.userContentController = userContent;
+
                     g_ticketWebView = [[WKWebView alloc] initWithFrame:NSMakeRect(8, 8, (CGFloat)(w-118), (CGFloat)(h-16)) configuration:config];
                     [g_ticketWebView setWantsLayer:YES];
                     [g_ticketWebView.layer setCornerRadius:14.0];
@@ -145,6 +163,7 @@ static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
                 CGFloat cardH = (CGFloat)(h - 16);
                 [g_ticketWebView setFrame:NSMakeRect(8, 8, cardW, cardH)];
                 [g_ticketWebView setHidden:NO];
+                [g_ticketWebView evaluateJavaScript:kHideJiraHeaderScript completionHandler:nil];
             }
             if (g_appWindow) {
                 [g_appWindow makeKeyAndOrderFront:nil];

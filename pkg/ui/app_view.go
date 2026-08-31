@@ -59,12 +59,14 @@ type AppView struct {
 
 	// Callbacks
 	onRedraw func()
+	onResize func(w, h int)
 }
 
 func NewAppView(
 	cfg jira.Config,
 	client *jira.Client,
 	onRedraw func(),
+	onResize func(w, h int),
 ) *AppView {
 	cfg.EnsureInstances()
 	if cfg.Instances[0].APIToken == "" || cfg.Instances[0].Email == "" {
@@ -84,6 +86,7 @@ func NewAppView(
 		debugMode:       cfg.DebugMode,
 		intervalVal:     fmt.Sprintf("%d", cfg.PollInterval),
 		onRedraw:        onRedraw,
+		onResize:        onResize,
 	}
 
 	v.loadInstanceFields(0)
@@ -94,14 +97,14 @@ func NewAppView(
 	// Background timer to collapse Fan state back to Rest when inactive
 	go func() {
 		for {
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(60 * time.Millisecond)
 			v.mu.Lock()
 			st := v.state
 			lastH := v.lastHover
 			searchAct := v.searchActive || v.searchQuery != ""
 			v.mu.Unlock()
 
-			if st == window.StateFan && !searchAct && !lastH.IsZero() && time.Since(lastH) > 380*time.Millisecond {
+			if st == window.StateFan && !searchAct && !lastH.IsZero() && time.Since(lastH) > 260*time.Millisecond {
 				v.SetState(window.StateRest)
 			}
 		}
@@ -231,6 +234,10 @@ func (v *AppView) SetState(newState window.WindowState) {
 
 	if window.DefaultManager != nil {
 		window.DefaultManager.SetState(newState, w, h)
+	}
+
+	if v.onResize != nil {
+		v.onResize(w, h)
 	}
 
 	if newState == window.StateExpanded && !showSettings {
@@ -1069,8 +1076,8 @@ func (v *AppView) Event(ctx widget.Context, e event.Event) bool {
 				return v.handleHover(ev.Position)
 			} else {
 				v.mu.Lock()
-				if v.state == window.StateFan && !v.lastHover.IsZero() {
-					v.lastHover = time.Now().Add(-200 * time.Millisecond)
+				if v.state == window.StateFan {
+					v.lastHover = time.Now().Add(-500 * time.Millisecond)
 				}
 				v.mu.Unlock()
 			}
