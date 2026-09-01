@@ -10,7 +10,38 @@ package window
 #include <QuartzCore/QuartzCore.h>
 #include <dispatch/dispatch.h>
 
-// Allow borderless HUD window to become key and receive text input
+static NSWindow *g_appWindow = nil;
+static WKWebView *g_ticketWebView = nil;
+
+static void SetupDarwinEditMenu(void) {
+    if ([NSApp mainMenu]) {
+        for (NSMenuItem *item in [[NSApp mainMenu] itemArray]) {
+            if ([[item title] isEqualToString:@"Edit"]) return;
+        }
+    }
+
+    NSMenu *mainMenu = [NSApp mainMenu];
+    if (!mainMenu) {
+        mainMenu = [[NSMenu alloc] initWithTitle:@"MainMenu"];
+        [NSApp setMainMenu:mainMenu];
+    }
+
+    NSMenuItem *editMenuItem = [[NSMenuItem alloc] initWithTitle:@"Edit" action:nil keyEquivalent:@""];
+    NSMenu *editMenu = [[NSMenu alloc] initWithTitle:@"Edit"];
+
+    [editMenu addItemWithTitle:@"Undo" action:@selector(undo:) keyEquivalent:@"z"];
+    [editMenu addItemWithTitle:@"Redo" action:@selector(redo:) keyEquivalent:@"Z"];
+    [editMenu addItem:[NSMenuItem separatorItem]];
+    [editMenu addItemWithTitle:@"Cut" action:@selector(cut:) keyEquivalent:@"x"];
+    [editMenu addItemWithTitle:@"Copy" action:@selector(copy:) keyEquivalent:@"c"];
+    [editMenu addItemWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"];
+    [editMenu addItemWithTitle:@"Select All" action:@selector(selectAll:) keyEquivalent:@"a"];
+
+    [editMenuItem setSubmenu:editMenu];
+    [mainMenu addItem:editMenuItem];
+}
+
+// Allow borderless HUD window to become key, receive text input, and handle Cmd+V/Cmd+C clipboard shortcuts
 @interface NSWindow (AllowKeyWindow)
 @end
 
@@ -21,10 +52,24 @@ package window
 - (BOOL)canBecomeMainWindow {
     return YES;
 }
+- (BOOL)performKeyEquivalent:(NSEvent *)event {
+    if (([event modifierFlags] & NSEventModifierFlagDeviceIndependentFlagsMask) == NSEventModifierFlagCommand) {
+        NSString *chars = [event charactersIgnoringModifiers];
+        if ([chars isEqualToString:@"v"]) {
+            if ([NSApp sendAction:@selector(paste:) to:nil from:self]) return YES;
+        } else if ([chars isEqualToString:@"c"]) {
+            if ([NSApp sendAction:@selector(copy:) to:nil from:self]) return YES;
+        } else if ([chars isEqualToString:@"x"]) {
+            if ([NSApp sendAction:@selector(cut:) to:nil from:self]) return YES;
+        } else if ([chars isEqualToString:@"a"]) {
+            if ([NSApp sendAction:@selector(selectAll:) to:nil from:self]) return YES;
+        } else if ([chars isEqualToString:@"z"]) {
+            if ([NSApp sendAction:@selector(undo:) to:nil from:self]) return YES;
+        }
+    }
+    return [super performKeyEquivalent:event];
+}
 @end
-
-static NSWindow *g_appWindow = nil;
-static WKWebView *g_ticketWebView = nil;
 
 static void MakeLayersTransparent(CALayer *layer) {
     if (!layer) return;
@@ -37,6 +82,8 @@ static void MakeLayersTransparent(CALayer *layer) {
 
 static void ApplyDarwinWindowStyles(NSWindow *window) {
     if (!window) return;
+
+    SetupDarwinEditMenu();
 
     // 1. Set style mask FIRST
     [window setStyleMask:NSWindowStyleMaskBorderless];
@@ -83,6 +130,8 @@ static void ApplyDarwinWindowStyles(NSWindow *window) {
 
 static void DarwinDockToRightEdge(int width, int height, int state) {
     dispatch_async(dispatch_get_main_queue(), ^{
+        SetupDarwinEditMenu();
+
         if (!g_appWindow) {
             NSArray *windows = [NSApp windows];
             if ([windows count] > 0) {
@@ -141,6 +190,8 @@ static NSString *const kHideJiraHeaderScript =
 
 static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
     dispatch_async(dispatch_get_main_queue(), ^{
+        SetupDarwinEditMenu();
+
         if (!g_appWindow) {
             NSArray *windows = [NSApp windows];
             if ([windows count] > 0) {
