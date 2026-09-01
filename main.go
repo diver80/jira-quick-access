@@ -23,11 +23,11 @@ func main() {
 	// 2. Initialize Jira multi-tenant REST client
 	client := jira.NewClient(cfg)
 
-	// 3. Initialize Gogpu engine
+	// 3. Initialize Gogpu engine with macOS Dock dimensions (32x224)
 	gogpuApp := gogpu.NewApp(gogpu.Config{
 		Title:  "",
-		Width:  26,
-		Height: 210,
+		Width:  32,
+		Height: 224,
 	})
 
 	// 4. Custom transparent theme so UI canvas clears with alpha=0 (no white corners)
@@ -57,10 +57,10 @@ func main() {
 
 	// 7. Background poller & edge dock positioning
 	go func() {
-		for _, delay := range []time.Duration{80 * time.Millisecond, 250 * time.Millisecond, 600 * time.Millisecond} {
+		for _, delay := range []time.Duration{60 * time.Millisecond, 200 * time.Millisecond, 500 * time.Millisecond} {
 			time.Sleep(delay)
 			if window.DefaultManager != nil {
-				_ = window.DefaultManager.InitEdgeRail(26, 210)
+				_ = window.DefaultManager.InitEdgeRail(32, 224)
 			}
 			gogpuApp.RequestRedraw()
 		}
@@ -74,7 +74,7 @@ func main() {
 		}
 	}()
 
-	fmt.Println("🚀 Jira Quick Access (Edge Rail HUD) running with transparent GPU canvas...")
+	fmt.Println("🚀 Jira Quick Access (macOS Dock Rail HUD) running...")
 
 	// 8. Run GPU desktop pipeline
 	if err := desktop.Run(gogpuApp, uiApp); err != nil {
