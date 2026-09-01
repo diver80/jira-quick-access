@@ -1,18 +1,39 @@
-//go:build (linux && !cgo) || (darwin && !cgo) || (!darwin && !windows && !linux)
+//go:build (!darwin && !windows) || (darwin && !cgo)
 
 package window
 
-type FallbackManager struct{}
+import "sync"
+
+type FallbackManager struct {
+	mu    sync.RWMutex
+	state WindowState
+}
 
 func init() {
 	if DefaultManager == nil {
-		DefaultManager = &FallbackManager{}
+		DefaultManager = &FallbackManager{
+			state: StateRest,
+		}
 	}
 }
 
-func (m *FallbackManager) InitEdgeRail(width, height int) error          { return nil }
-func (m *FallbackManager) SetState(state WindowState, width, height int) {}
-func (m *FallbackManager) DockToRightEdge(width, height int)             {}
+func (m *FallbackManager) InitEdgeRail(width, height int) error {
+	m.SetState(StateRest, width, height)
+	return nil
+}
+
+func (m *FallbackManager) SetState(state WindowState, width, height int) {
+	m.mu.Lock()
+	m.state = state
+	m.mu.Unlock()
+	m.DockToRightEdge(width, height)
+}
+
+func (m *FallbackManager) DockToRightEdge(width, height int) {
+	m.mu.RLock()
+	_ = m.state
+	m.mu.RUnlock()
+}
 func (m *FallbackManager) OpenTicketURL(url string) error {
 	return OpenURL(url)
 }

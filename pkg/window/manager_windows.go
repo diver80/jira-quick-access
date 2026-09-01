@@ -3,6 +3,7 @@
 package window
 
 import (
+	"sync"
 	"syscall"
 )
 
@@ -20,22 +21,33 @@ const (
 	smCyScreen    = 1
 )
 
-type WindowsManager struct{}
+type WindowsManager struct {
+	mu    sync.RWMutex
+	state WindowState
+}
 
 func init() {
-	DefaultManager = &WindowsManager{}
+	DefaultManager = &WindowsManager{
+		state: StateRest,
+	}
 }
 
 func (m *WindowsManager) InitEdgeRail(width, height int) error {
-	m.DockToRightEdge(width, height)
+	m.SetState(StateRest, width, height)
 	return nil
 }
 
 func (m *WindowsManager) SetState(state WindowState, width, height int) {
+	m.mu.Lock()
+	m.state = state
+	m.mu.Unlock()
 	m.DockToRightEdge(width, height)
 }
 
 func (m *WindowsManager) DockToRightEdge(width, height int) {
+	m.mu.RLock()
+	_ = m.state
+	m.mu.RUnlock()
 	hwnd, _, _ := procGetActiveWindow.Call()
 	if hwnd == 0 {
 		return

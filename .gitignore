@@ -29,6 +29,7 @@
 *.log
 /tmp/
 /scratch/
+.agents/
 
 # Go Test coverage & binaries
 *.test

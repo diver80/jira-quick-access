@@ -27,6 +27,11 @@ func NewClient(cfg Config) *Client {
 	return &Client{
 		config: cfg,
 		httpClient: &http.Client{
+			Transport: &http.Transport{
+				MaxIdleConns:        20,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+			},
 			Timeout: 15 * time.Second,
 		},
 	}
@@ -61,6 +66,8 @@ func authHeaderFor(email, token string) string {
 }
 
 func (c *Client) authHeader() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return authHeaderFor(c.config.Email, c.config.APIToken)
 }
 
@@ -124,7 +131,8 @@ func (c *Client) VerifyInstanceConnection(ctx context.Context, baseURL, email, t
 			continue
 		}
 		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
 
 		if resp.StatusCode == http.StatusOK {
 			var user struct {
@@ -151,7 +159,7 @@ func (c *Client) VerifyInstanceConnection(ctx context.Context, baseURL, email, t
 	return "", lastErr
 }
 
-// FetchAssignedIssues fetches assigned tickets across all configured instances.
+// FetchAssignedIssues fetches assigned tickets across all configured instances concurrently.
 func (c *Client) FetchAssignedIssues(ctx context.Context) ([]Issue, error) {
 	c.mu.RLock()
 	cfg := c.config
@@ -164,8 +172,12 @@ func (c *Client) FetchAssignedIssues(ctx context.Context) ([]Issue, error) {
 
 	cfg.EnsureInstances()
 
-	var allIssues []Issue
-	var lastErr error
+	var (
+		mu        sync.Mutex
+		allIssues []Issue
+		lastErr   error
+		wg        sync.WaitGroup
+	)
 
 	for _, inst := range cfg.Instances {
 		if inst.BaseURL == "" || inst.APIToken == "" {
@@ -175,22 +187,31 @@ func (c *Client) FetchAssignedIssues(ctx context.Context) ([]Issue, error) {
 			continue
 		}
 
-		if debug {
-			log.Printf("[Jira DEBUG] Fetching issues for instance %q (%s)...", inst.Name, inst.BaseURL)
-		}
+		wg.Add(1)
+		go func(targetInst InstanceConfig) {
+			defer wg.Done()
+			if debug {
+				log.Printf("[Jira DEBUG] Fetching issues for instance %q (%s)...", targetInst.Name, targetInst.BaseURL)
+			}
 
-		issues, err := c.fetchIssuesForInstance(ctx, inst)
-		if err != nil {
-			log.Printf("[Jira WARN] Failed to fetch issues for %s (%s): %v", inst.Name, inst.BaseURL, err)
-			lastErr = err
-			continue
-		}
+			issues, err := c.fetchIssuesForInstance(ctx, targetInst)
+			mu.Lock()
+			defer mu.Unlock()
 
-		if debug {
-			log.Printf("[Jira DEBUG] Retrieved %d issues for %q", len(issues), inst.Name)
-		}
-		allIssues = append(allIssues, issues...)
+			if err != nil {
+				log.Printf("[Jira WARN] Failed to fetch issues for %s (%s): %v", targetInst.Name, targetInst.BaseURL, err)
+				lastErr = err
+				return
+			}
+
+			if debug {
+				log.Printf("[Jira DEBUG] Retrieved %d issues for %q", len(issues), targetInst.Name)
+			}
+			allIssues = append(allIssues, issues...)
+		}(inst)
 	}
+
+	wg.Wait()
 
 	if len(allIssues) == 0 && lastErr != nil {
 		return nil, lastErr
@@ -247,7 +268,8 @@ func (c *Client) fetchIssuesForInstance(ctx context.Context, inst InstanceConfig
 			continue
 		}
 		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
 
 		if resp.StatusCode == http.StatusOK {
 			return parseIssuesResponse(body, inst.ID, inst.Name, baseURL)
@@ -326,86 +348,156 @@ func parseIssuesResponse(data []byte, instID, instName, baseURL string) ([]Issue
 	return issues, nil
 }
 
-// FetchTransitions returns available workflow transitions for an issue.
-func (c *Client) FetchTransitions(ctx context.Context, issueKey string) ([]Transition, error) {
+func (c *Client) resolveInstanceForIssue(issue Issue) (baseURL, email, token string) {
 	c.mu.RLock()
-	cfg := c.config
-	c.mu.RUnlock()
+	defer c.mu.RUnlock()
 
-	if cfg.DemoMode {
-		return GetMockTransitions(issueKey), nil
+	// 1. Try matching by InstanceID
+	if issue.InstanceID != "" {
+		for _, inst := range c.config.Instances {
+			if inst.ID == issue.InstanceID {
+				return inst.BaseURL, inst.Email, inst.APIToken
+			}
+		}
 	}
 
-	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
-	url := fmt.Sprintf("%s/rest/api/3/issue/%s/transitions", baseURL, issueKey)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, err
+	// 2. Try matching by BaseURL (exact or prefix match)
+	if issue.BaseURL != "" {
+		issueBase := strings.TrimRight(strings.TrimSpace(issue.BaseURL), "/")
+		for _, inst := range c.config.Instances {
+			instBase := strings.TrimRight(strings.TrimSpace(inst.BaseURL), "/")
+			if instBase != "" && (strings.EqualFold(instBase, issueBase) || strings.HasPrefix(issueBase, instBase)) {
+				return inst.BaseURL, inst.Email, inst.APIToken
+			}
+		}
 	}
 
-	auth := c.authHeader()
-	if auth != "" {
-		req.Header.Set("Authorization", auth)
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	// 3. Try matching by InstanceName
+	if issue.InstanceName != "" {
+		for _, inst := range c.config.Instances {
+			if strings.EqualFold(inst.Name, issue.InstanceName) {
+				return inst.BaseURL, inst.Email, inst.APIToken
+			}
+		}
 	}
 
-	var transResp struct {
-		Transitions []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-			To   struct {
-				ID             string `json:"id"`
-				Name           string `json:"name"`
-				StatusCategory struct {
-					Key string `json:"key"`
-				} `json:"statusCategory"`
-			} `json:"to"`
-		} `json:"transitions"`
+	// 4. Fallback to primary config if set, otherwise first instance
+	if c.config.BaseURL != "" {
+		return c.config.BaseURL, c.config.Email, c.config.APIToken
+	}
+	if len(c.config.Instances) > 0 {
+		return c.config.Instances[0].BaseURL, c.config.Instances[0].Email, c.config.Instances[0].APIToken
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&transResp); err != nil {
-		return nil, err
-	}
-
-	var transitions []Transition
-	for _, t := range transResp.Transitions {
-		transitions = append(transitions, Transition{
-			ID:   t.ID,
-			Name: t.Name,
-			To: Status{
-				ID:          t.To.ID,
-				Name:        t.To.Name,
-				CategoryKey: t.To.StatusCategory.Key,
-			},
-		})
-	}
-	return transitions, nil
+	return "", "", ""
 }
 
-// DoTransition executes a workflow transition.
-func (c *Client) DoTransition(ctx context.Context, issueKey string, transitionID string) error {
+// FetchTransitions returns available workflow transitions for an issue across REST v3 and v2.
+func (c *Client) FetchTransitions(ctx context.Context, issue Issue) ([]Transition, error) {
 	c.mu.RLock()
-	cfg := c.config
+	demoMode := c.config.DemoMode
 	c.mu.RUnlock()
 
-	if cfg.DemoMode {
-		return nil
+	if demoMode {
+		return GetMockTransitions(issue.Key), nil
 	}
 
-	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
-	url := fmt.Sprintf("%s/rest/api/3/issue/%s/transitions", baseURL, issueKey)
+	baseURL, email, token := c.resolveInstanceForIssue(issue)
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		return nil, fmt.Errorf("missing Jira Base URL for issue %s", issue.Key)
+	}
+
+	endpoints := []string{
+		fmt.Sprintf("%s/rest/api/3/issue/%s/transitions", baseURL, issue.Key),
+		fmt.Sprintf("%s/rest/api/2/issue/%s/transitions", baseURL, issue.Key),
+	}
+
+	auth := authHeaderFor(email, token)
+	var lastErr error
+
+	for _, endpoint := range endpoints {
+		req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		body, _ := io.ReadAll(resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			var transResp struct {
+				Transitions []struct {
+					ID   string `json:"id"`
+					Name string `json:"name"`
+					To   struct {
+						ID             string `json:"id"`
+						Name           string `json:"name"`
+						StatusCategory struct {
+							Key string `json:"key"`
+						} `json:"statusCategory"`
+					} `json:"to"`
+				} `json:"transitions"`
+			}
+
+			if err := json.Unmarshal(body, &transResp); err != nil {
+				return nil, err
+			}
+
+			var transitions []Transition
+			for _, t := range transResp.Transitions {
+				transitions = append(transitions, Transition{
+					ID:   t.ID,
+					Name: t.Name,
+					To: Status{
+						ID:          t.To.ID,
+						Name:        t.To.Name,
+						CategoryKey: t.To.StatusCategory.Key,
+					},
+				})
+			}
+			return transitions, nil
+		}
+
+		lastErr = fmt.Errorf("HTTP %d on %s: %s", resp.StatusCode, endpoint, string(body))
+	}
+
+	return nil, lastErr
+}
+
+// DoTransition executes a workflow transition routing to the issue's parent instance with REST v3 & v2 fallback.
+func (c *Client) DoTransition(ctx context.Context, issue Issue, transitionID string) error {
+	c.mu.RLock()
+	demoMode := c.config.DemoMode
+	c.mu.RUnlock()
+
+	if demoMode {
+		return ExecuteMockTransition(issue.Key, transitionID)
+	}
+
+	baseURL, email, token := c.resolveInstanceForIssue(issue)
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		return fmt.Errorf("missing Jira Base URL for issue %s", issue.Key)
+	}
+
+	endpoints := []string{
+		fmt.Sprintf("%s/rest/api/3/issue/%s/transitions", baseURL, issue.Key),
+		fmt.Sprintf("%s/rest/api/2/issue/%s/transitions", baseURL, issue.Key),
+	}
 
 	payload := map[string]interface{}{
 		"transition": map[string]string{
@@ -417,32 +509,43 @@ func (c *Client) DoTransition(ctx context.Context, issueKey string, transitionID
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return err
-	}
+	auth := authHeaderFor(email, token)
+	var lastErr error
 
-	auth := c.authHeader()
-	if auth != "" {
-		req.Header.Set("Authorization", auth)
-	}
-	req.Header.Set("Content-Type", "application/json")
+	for _, endpoint := range endpoints {
+		req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(bodyBytes))
+		if err != nil {
+			lastErr = err
+			continue
+		}
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
 
-	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("transition failed (HTTP %d): %s", resp.StatusCode, string(body))
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+
+		if resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusOK {
+			return nil
+		}
+
+		lastErr = fmt.Errorf("transition failed (HTTP %d on %s): %s", resp.StatusCode, endpoint, string(body))
 	}
 
-	return nil
+	return lastErr
 }
 
-// ExecuteTransition is an alias for DoTransition supporting mock and live.
+// ExecuteTransition is an alias for DoTransition supporting mock and live workflow execution.
 func (c *Client) ExecuteTransition(ctx context.Context, issueKey string, transitionID string) error {
 	c.mu.RLock()
 	cfg := c.config
@@ -451,7 +554,7 @@ func (c *Client) ExecuteTransition(ctx context.Context, issueKey string, transit
 	if cfg.DemoMode {
 		return ExecuteMockTransition(issueKey, transitionID)
 	}
-	return c.DoTransition(ctx, issueKey, transitionID)
+	return c.DoTransition(ctx, Issue{Key: issueKey}, transitionID)
 }
 
 // FormatBranchName generates a sanitized git branch name from ticket key and summary.

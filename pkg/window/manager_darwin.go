@@ -318,6 +318,7 @@ func RegisterCollapseHandler(cb func()) {
 }
 
 type DarwinManager struct {
+	mu    sync.RWMutex
 	state WindowState
 }
 
@@ -335,12 +336,18 @@ func (m *DarwinManager) InitEdgeRail(width, height int) error {
 }
 
 func (m *DarwinManager) SetState(state WindowState, width, height int) {
+	m.mu.Lock()
 	m.state = state
-	m.DockToRightEdge(width, height)
+	st := m.state
+	m.mu.Unlock()
+	C.DarwinDockToRightEdge(C.int(width), C.int(height), C.int(st))
 }
 
 func (m *DarwinManager) DockToRightEdge(width, height int) {
-	C.DarwinDockToRightEdge(C.int(width), C.int(height), C.int(m.state))
+	m.mu.RLock()
+	st := m.state
+	m.mu.RUnlock()
+	C.DarwinDockToRightEdge(C.int(width), C.int(height), C.int(st))
 }
 
 func (m *DarwinManager) OpenTicketURL(url string) error {

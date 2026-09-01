@@ -1,6 +1,7 @@
 package jira
 
 import (
+	"strings"
 	"time"
 )
 
@@ -12,6 +13,14 @@ type InstanceConfig struct {
 	Email    string `json:"email"`
 	APIToken string `json:"api_token"`
 	JQLQuery string `json:"jql_query"`
+}
+
+// MaskedAPIToken returns a masked representation of the instance API token for logging and UI display.
+func (ic InstanceConfig) MaskedAPIToken() string {
+	if len(ic.APIToken) <= 6 {
+		return strings.Repeat("*", len(ic.APIToken))
+	}
+	return ic.APIToken[:3] + "..." + ic.APIToken[len(ic.APIToken)-3:]
 }
 
 // Config holds multi-instance Jira settings and global application preferences.
@@ -27,6 +36,18 @@ type Config struct {
 	PinnedKeys   []string         `json:"pinned_keys"`   // Pinned issue keys
 	DemoMode     bool             `json:"demo_mode"`     // Mock / demo workflow without live Jira
 	DebugMode    bool             `json:"debug_mode"`    // Verbose logging of API requests & auth headers
+}
+
+// MaskedAPIToken returns a masked representation of the active/primary API token.
+func (c Config) MaskedAPIToken() string {
+	tok := c.APIToken
+	if tok == "" && len(c.Instances) > 0 {
+		tok = c.Instances[0].APIToken
+	}
+	if len(tok) <= 6 {
+		return strings.Repeat("*", len(tok))
+	}
+	return tok[:3] + "..." + tok[len(tok)-3:]
 }
 
 // EnsureInstances ensures at least one valid instance exists from top-level or instances list.

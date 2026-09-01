@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"jira-quick-access/pkg/jira"
 
@@ -15,6 +16,7 @@ import (
 // SettingsWidget handles credential configuration and endpoint verification.
 type SettingsWidget struct {
 	widget.WidgetBase
+	mu            sync.RWMutex
 	config        jira.Config
 	onSave        func(cfg jira.Config)
 	onClose       func()
@@ -73,26 +75,35 @@ func NewSettingsWidget(cfg jira.Config, onSave func(cfg jira.Config), onClose fu
 }
 
 func (s *SettingsWidget) updateDemoToggleText() {
+	s.mu.RLock()
+	demo := s.demoMode
+	s.mu.RUnlock()
+
 	text := "Mode: Live Jira"
-	if s.demoMode {
+	if demo {
 		text = "Mode: Demo Mock Data"
 	}
 	s.btnDemoToggle = NewGlassButton(text, func() {
+		s.mu.Lock()
 		s.demoMode = !s.demoMode
+		s.mu.Unlock()
 		s.updateDemoToggleText()
 		s.MarkNeedsLayout()
 	}).SetCompact(true)
 }
 
 func (s *SettingsWidget) testConnection() {
+	s.mu.Lock()
 	s.statusMessage = "Testing connection..."
 	s.statusColor = ColorStatusInProgress
+	s.mu.Unlock()
 
 	testCfg := s.currentConfig()
 	testClient := jira.NewClient(testCfg)
 
 	go func() {
 		user, err := testClient.VerifyConnection(context.Background())
+		s.mu.Lock()
 		if err != nil {
 			s.statusMessage = fmt.Sprintf("Error: %v", err)
 			s.statusColor = widget.RGBA8(239, 68, 68, 255)
@@ -100,26 +111,41 @@ func (s *SettingsWidget) testConnection() {
 			s.statusMessage = fmt.Sprintf("✓ Connected as %s", user)
 			s.statusColor = ColorStatusDone
 		}
+		s.mu.Unlock()
 		s.MarkNeedsLayout()
 	}()
 }
 
 func (s *SettingsWidget) currentConfig() jira.Config {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	var pollInterval int
 	fmt.Sscanf(s.intervalValue, "%d", &pollInterval)
 	if pollInterval <= 0 {
 		pollInterval = 60
 	}
 
-	return jira.Config{
-		BaseURL:      strings.TrimSpace(s.urlValue),
-		Email:        strings.TrimSpace(s.emailValue),
-		APIToken:     strings.TrimSpace(s.tokenValue),
-		JQLQuery:     strings.TrimSpace(s.jqlValue),
-		PollInterval: pollInterval,
-		DemoMode:     s.demoMode,
-		PinnedKeys:   s.config.PinnedKeys,
+	cfg := s.config
+	cfg.BaseURL = strings.TrimSpace(s.urlValue)
+	cfg.Email = strings.TrimSpace(s.emailValue)
+	cfg.APIToken = strings.TrimSpace(s.tokenValue)
+	cfg.JQLQuery = strings.TrimSpace(s.jqlValue)
+	cfg.PollInterval = pollInterval
+	cfg.DemoMode = s.demoMode
+	cfg.PinnedKeys = s.config.PinnedKeys
+
+	if len(cfg.Instances) > 0 {
+		instances := make([]jira.InstanceConfig, len(cfg.Instances))
+		copy(instances, cfg.Instances)
+		instances[0].BaseURL = cfg.BaseURL
+		instances[0].Email = cfg.Email
+		instances[0].APIToken = cfg.APIToken
+		instances[0].JQLQuery = cfg.JQLQuery
+		cfg.Instances = instances
 	}
+
+	return cfg
 }
 
 func (s *SettingsWidget) saveAndApply() {
@@ -171,17 +197,28 @@ func (s *SettingsWidget) Draw(ctx widget.Context, canvas widget.Canvas) {
 	headerRect := geometry.NewRect(b.Min.X+20, b.Min.Y+16, b.Width()-80, 24)
 	canvas.DrawText("⚙ Jira Configuration & Credentials", headerRect, 14, widget.RGBA8(255, 255, 255, 255), true, widget.TextAlignLeft)
 
+	s.mu.RLock()
+	stMsg := s.statusMessage
+	stCol := s.statusColor
+	urlVal := s.urlValue
+	emailVal := s.emailValue
+	tokVal := s.tokenValue
+	jqlVal := s.jqlValue
+	intVal := s.intervalValue
+	actField := s.activeField
+	s.mu.RUnlock()
+
 	// Fields
 	fields := []struct {
 		label string
 		value string
 		idx   int
 	}{
-		{"Jira Base URL", s.urlValue, 1},
-		{"User Email", s.emailValue, 2},
-		{"API Token", maskToken(s.tokenValue), 3},
-		{"Custom JQL Query", s.jqlValue, 4},
-		{"Poll Interval (seconds)", s.intervalValue, 5},
+		{"Jira Base URL", urlVal, 1},
+		{"User Email", emailVal, 2},
+		{"API Token", maskToken(tokVal), 3},
+		{"Custom JQL Query", jqlVal, 4},
+		{"Poll Interval (seconds)", intVal, 5},
 	}
 
 	startY := b.Min.Y + 48
@@ -196,7 +233,7 @@ func (s *SettingsWidget) Draw(ctx widget.Context, canvas widget.Canvas) {
 		inputRect := geometry.NewRect(b.Min.X+20, fieldY+16, b.Width()-40, 24)
 		bgCol := widget.RGBA8(14, 18, 26, 255)
 		borderCol := widget.RGBA8(255, 255, 255, 20)
-		if s.activeField == f.idx {
+		if actField == f.idx {
 			bgCol = widget.RGBA8(22, 28, 42, 255)
 			borderCol = ColorStatusToDo
 		}
@@ -213,9 +250,9 @@ func (s *SettingsWidget) Draw(ctx widget.Context, canvas widget.Canvas) {
 	}
 
 	// Status Message
-	if s.statusMessage != "" {
+	if stMsg != "" {
 		stRect := geometry.NewRect(b.Min.X+20, b.Min.Y+b.Height()-68, b.Width()-40, 16)
-		canvas.DrawText(s.statusMessage, stRect, 11, s.statusColor, false, widget.TextAlignLeft)
+		canvas.DrawText(stMsg, stRect, 11, stCol, false, widget.TextAlignLeft)
 	}
 
 	// Buttons
@@ -244,20 +281,29 @@ func (s *SettingsWidget) Event(ctx widget.Context, e event.Event) bool {
 		if ev.MouseType == event.MousePress {
 			b := s.Bounds()
 			startY := b.Min.Y + 48
+			s.mu.Lock()
+			matched := false
 			for i := 0; i < 5; i++ {
 				fieldY := startY + float32(i*46)
 				inputRect := geometry.NewRect(b.Min.X+20, fieldY+16, b.Width()-40, 24)
 				if inputRect.Contains(ev.Position) {
 					s.activeField = i + 1
-					s.MarkNeedsLayout()
-					return true
+					matched = true
+					break
 				}
 			}
-			s.activeField = 0
+			if !matched {
+				s.activeField = 0
+			}
+			s.mu.Unlock()
 			s.MarkNeedsLayout()
+			return matched
 		}
 	case *event.KeyEvent:
-		if ev.KeyType == event.KeyPress && s.activeField > 0 {
+		s.mu.RLock()
+		actField := s.activeField
+		s.mu.RUnlock()
+		if ev.KeyType == event.KeyPress && actField > 0 {
 			s.handleKeyInput(ev)
 			s.MarkNeedsLayout()
 			return true
@@ -268,6 +314,9 @@ func (s *SettingsWidget) Event(ctx widget.Context, e event.Event) bool {
 }
 
 func (s *SettingsWidget) handleKeyInput(ev *event.KeyEvent) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	target := &s.urlValue
 	switch s.activeField {
 	case 1:

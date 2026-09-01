@@ -16,6 +16,11 @@ import (
 	"github.com/gogpu/ui/widget"
 )
 
+var (
+	version   = "dev"
+	buildTime = "unknown"
+)
+
 func main() {
 	// 1. Load multi-tenant configuration (or default fallback with .env)
 	cfg := jira.LoadConfig()
@@ -52,6 +57,10 @@ func main() {
 			gogpuApp.RequestRedraw()
 		},
 	)
+	defer rootView.Close()
+
+	// Initial issue fetch
+	rootView.RefreshIssues()
 
 	uiApp.SetRoot(rootView)
 
@@ -65,7 +74,12 @@ func main() {
 			gogpuApp.RequestRedraw()
 		}
 
-		ticker := time.NewTicker(time.Duration(cfg.PollInterval) * time.Second)
+		pollInterval := cfg.PollInterval
+		if pollInterval <= 0 {
+			pollInterval = 60
+		}
+
+		ticker := time.NewTicker(time.Duration(pollInterval) * time.Second)
 		defer ticker.Stop()
 
 		for range ticker.C {
@@ -74,7 +88,7 @@ func main() {
 		}
 	}()
 
-	fmt.Println("🚀 Jira Quick Access (macOS Dock Rail HUD) running...")
+	fmt.Printf("🚀 Jira Quick Access v%s (built %s) [macOS Dock Rail HUD] running...\n", version, buildTime)
 
 	// 8. Run GPU desktop pipeline
 	if err := desktop.Run(gogpuApp, uiApp); err != nil {
