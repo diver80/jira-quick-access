@@ -10,7 +10,7 @@ No dock clutter, no window to manage. Slide the pointer to the right edge and th
 
 | At rest | Fanned | A ticket pulled open |
 |---|---|---|
-| <img src="docs/screenshots/rest.png" width="160" alt="At rest capsule" /> | <img src="docs/screenshots/fan.png" width="220" alt="Fanned tabs" /> | <img src="docs/screenshots/expanded.png" width="460" alt="A ticket pulled open" /> |
+| ![The deck at rest: 32 pt macOS Dock frosted capsule with instance beacons & proportional status gauges](docs/screenshots/rest.png) | ![The deck fanned into shingled pastel tabs](docs/screenshots/fan.png) | ![A ticket pulled open in full-size native WebKit view](docs/screenshots/expanded.png) |
 
 | State | What you see | Trigger |
 |---|---|---|
@@ -22,9 +22,7 @@ No dock clutter, no window to manage. Slide the pointer to the right edge and th
 
 ## 📸 Settings & Multi-Instance Management
 
-<p align="center">
-  <img src="docs/screenshots/settings.png" width="760" alt="Jira Instances & Credentials Settings Overlay" />
-</p>
+![Jira Instances & Credentials Settings Overlay](docs/screenshots/settings.png)
 
 Manage credentials, multi-instance tabs (e.g. *Avono*, *Sandbox*, *Sandbox*), custom JQL queries, connection test verification, and `.env` import.
 
