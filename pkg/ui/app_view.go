@@ -19,7 +19,7 @@ import (
 
 // AppView implements the 3-state edge architecture with multi-instance support & macOS Dock styling:
 // 1. Rest: Sleek discrete macOS Dock capsule with complete crisp frosted border & proportional gauges (32x224)
-// 2. Fan: Shingled vertical tabs down the edge with instant search & rock-solid mouse tracking (120xH)
+// 2. Fan: Shingled vertical tabs down the edge with instant search & responsive hover magnification (120xH)
 // 3. Expanded: Full floating card / native mobile webview level with its tab (780x580)
 type AppView struct {
 	widget.WidgetBase
@@ -37,6 +37,10 @@ type AppView struct {
 	lastHover    time.Time
 	scrollY      float32
 	mu           sync.Mutex
+
+	// Hover tracking for Fan mode dock interaction
+	hoveredTabIdx   int  // Index of hovered tab in Fan mode (-1 if none)
+	hoveredSettings bool // True if settings button is hovered in Fan mode
 
 	// Multi-instance filtering & settings tracking
 	activeInstIdx   int // Currently viewed instance filter in Fan & Expanded states (0..n-1)
@@ -78,6 +82,8 @@ func NewAppView(
 		activeTheme:     ThemeMint,
 		state:           window.StateRest,
 		showSettings:    false,
+		hoveredTabIdx:   -1,
+		hoveredSettings: false,
 		activeInstIdx:   0,
 		selectedInstIdx: 0,
 		demoMode:        cfg.DemoMode,
@@ -244,6 +250,8 @@ func (v *AppView) computeSize(st window.WindowState) (int, int) {
 func (v *AppView) SetState(newState window.WindowState) {
 	v.mu.Lock()
 	v.state = newState
+	v.hoveredTabIdx = -1
+	v.hoveredSettings = false
 	if newState == window.StateFan {
 		v.lastHover = time.Now()
 	} else {
@@ -496,6 +504,8 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	searchQ := v.searchQuery
 	searchAct := v.searchActive
 	activeInstIdx := v.activeInstIdx
+	hoveredTab := v.hoveredTabIdx
+	hoveredSet := v.hoveredSettings
 	instances := v.config.Instances
 	v.mu.Unlock()
 
@@ -737,13 +747,29 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				}
 
 				tabTheme := GetTicketTheme(i)
-				tabRect := geometry.NewRect(b.Min.X+7, tabY, w-14, tabHeight)
+				isHovered := (i == hoveredTab)
+
+				tabX := b.Min.X + 7
+				tabW := w - 14
+				if isHovered {
+					tabX = b.Min.X + 3
+					tabW = w - 10
+				}
+
+				tabRect := geometry.NewRect(tabX, tabY, tabW, tabHeight)
 
 				canvas.DrawRoundRect(tabRect, tabTheme.Background, 8)
-				canvas.StrokeRoundRect(tabRect, tabTheme.Border, 8, 1.0)
+				if isHovered {
+					// Glowing animated Dock-style hover lift
+					canvas.StrokeRoundRect(tabRect, widget.RGBA8(255, 255, 255, 240), 8, 1.5)
+					// Vibrant indicator pill on left edge
+					canvas.DrawRoundRect(geometry.NewRect(tabX+2, tabY+8, 3, tabHeight-16), tabTheme.Foreground, 1.5)
+				} else {
+					canvas.StrokeRoundRect(tabRect, tabTheme.Border, 8, 1.0)
+				}
 
 				// Tab Key
-				keyRect := geometry.NewRect(b.Min.X+9, tabY+6, w-18, 15)
+				keyRect := geometry.NewRect(tabX+2, tabY+6, tabW-4, 15)
 				canvas.DrawText(iss.Key, keyRect, 11, tabTheme.Foreground, true, widget.TextAlignCenter)
 
 				// Tab Status
@@ -751,8 +777,12 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				if len(shortStatus) > 13 {
 					shortStatus = shortStatus[:13]
 				}
-				statusRect := geometry.NewRect(b.Min.X+9, tabY+25, w-18, 14)
-				canvas.DrawText(shortStatus, statusRect, 9, tabTheme.Secondary, false, widget.TextAlignCenter)
+				statusRect := geometry.NewRect(tabX+2, tabY+25, tabW-4, 14)
+				secColor := tabTheme.Secondary
+				if isHovered {
+					secColor = widget.RGBA8(255, 255, 255, 255)
+				}
+				canvas.DrawText(shortStatus, statusRect, 9, secColor, isHovered, widget.TextAlignCenter)
 			}
 		}
 
@@ -780,10 +810,20 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 
 		// Settings Tab
 		settingsTabY := b.Min.Y + h - 42
-		settingsTabRect := geometry.NewRect(b.Min.X+7, settingsTabY, w-14, 34)
-		canvas.DrawRoundRect(settingsTabRect, widget.RGBA8(36, 46, 66, 230), 8)
-		canvas.StrokeRoundRect(settingsTabRect, widget.RGBA8(255, 255, 255, 45), 8, 1.0)
-		setTxtRect := geometry.NewRect(b.Min.X+9, settingsTabY+9, w-18, 16)
+		setX := b.Min.X + 7
+		setW := w - 14
+		setBg := widget.RGBA8(36, 46, 66, 230)
+		setBorder := widget.RGBA8(255, 255, 255, 45)
+		if hoveredSet {
+			setX = b.Min.X + 4
+			setW = w - 11
+			setBg = widget.RGBA8(52, 68, 96, 245)
+			setBorder = widget.RGBA8(255, 255, 255, 180)
+		}
+		settingsTabRect := geometry.NewRect(setX, settingsTabY, setW, 34)
+		canvas.DrawRoundRect(settingsTabRect, setBg, 8)
+		canvas.StrokeRoundRect(settingsTabRect, setBorder, 8, 1.0)
+		setTxtRect := geometry.NewRect(setX+2, settingsTabY+9, setW-4, 16)
 		canvas.DrawText("Settings", setTxtRect, 10, widget.RGBA8(230, 240, 255, 255), true, widget.TextAlignCenter)
 		return
 	}
@@ -1156,6 +1196,8 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 	instCount := len(v.config.Instances)
 	b := v.Bounds()
 	h := b.Height()
+	w := b.Width()
+	scrollY := v.scrollY
 	v.mu.Unlock()
 
 	// REST STATE: Hovering specific instance or settings dot
@@ -1186,10 +1228,50 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 		return true
 	}
 
+	// FAN STATE: Track hovered tab / settings button for interactive lift effect
 	if st == window.StateFan {
 		v.mu.Lock()
 		v.lastHover = time.Now()
+		prevHoverTab := v.hoveredTabIdx
+		prevHoverSet := v.hoveredSettings
 		v.mu.Unlock()
+
+		newHoverTab := -1
+		newHoverSet := false
+
+		if pos.Y >= b.Min.Y+h-44 {
+			newHoverSet = true
+		} else {
+			filtered := v.getFilteredIssues()
+			tabMinY := b.Min.Y + float32(60)
+			tabMaxY := b.Min.Y + h - float32(50)
+			tabStartY := tabMinY - scrollY
+			tabHeight := float32(48)
+			tabGap := float32(6)
+
+			for i := range filtered {
+				tabY := tabStartY + float32(i)*(tabHeight+tabGap)
+				if tabY < tabMinY-2 || tabY+tabHeight > tabMaxY+2 {
+					continue
+				}
+				tabRect := geometry.NewRect(b.Min.X+2, tabY, w-4, tabHeight)
+				if tabRect.Contains(pos) {
+					newHoverTab = i
+					break
+				}
+			}
+		}
+
+		if newHoverTab != prevHoverTab || newHoverSet != prevHoverSet {
+			v.mu.Lock()
+			v.hoveredTabIdx = newHoverTab
+			v.hoveredSettings = newHoverSet
+			v.mu.Unlock()
+			v.MarkNeedsLayout()
+			if v.onRedraw != nil {
+				v.onRedraw()
+			}
+		}
 	}
 
 	return false
