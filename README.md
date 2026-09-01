@@ -28,6 +28,17 @@ No dock clutter, no window to manage. Slide the pointer to the right edge and th
 
 Manage credentials, multi-instance tabs (e.g. *Avono*, *Sandbox*, *Sandbox*), custom JQL queries, connection test verification, and `.env` import.
 
+### 💾 Where Settings & Credentials Are Stored
+
+All instance settings, JQL queries, and credentials are saved locally on your device:
+
+| Operating System | Configuration File Path |
+|---|---|
+| **macOS & Linux** | `~/.jira-quick-access/config.json` |
+| **Windows** | `%USERPROFILE%\.jira-quick-access\config.json` |
+
+You can also drop a `.env` file (see `.env.example`) directly in the app's working directory and click **Load .env** in the Settings overlay for instant credential provisioning.
+
 ---
 
 ## ✨ Features & Polish

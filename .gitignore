@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Packages & Build Artifacts
+/pkg/
+
 # Binaries & Executables
 /jira-quick-access
 *.exe
