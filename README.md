@@ -10,13 +10,23 @@ No dock clutter, no window to manage. Slide the pointer to the right edge and th
 
 | At rest | Fanned | A ticket pulled open |
 |---|---|---|
-| A 32 pt macOS Dock frosted capsule with instance beacons & proportional status gauges | Shingled pastel tabs with instant search, cycle headers & Dock-style hover lift | Full embedded ticket view in native WebKit with floating close button & side tabs |
+| <img src="docs/screenshots/rest.png" width="160" alt="At rest capsule" /> | <img src="docs/screenshots/fan.png" width="220" alt="Fanned tabs" /> | <img src="docs/screenshots/expanded.png" width="460" alt="A ticket pulled open" /> |
 
 | State | What you see | Trigger |
 |---|---|---|
 | **Rest** | A 32 pt discrete frosted glass capsule on the right screen edge — glowing beacons, live ticket counts, and proportional status breakdown gauges (To Do / In Progress / Done) per instance | idle |
 | **Fan** | Ticket tabs shingle down the edge with instant search, multi-instance cycling, and animated Dock-style hover magnification | pointer enters the capsule |
 | **Expanded** | The ticket slides open in full size via embedded hardware-accelerated WebKit, stripped of bloated Jira navigation headers, level with its own side shelf | click a tab |
+
+---
+
+## 📸 Settings & Multi-Instance Management
+
+<p align="center">
+  <img src="docs/screenshots/settings.png" width="760" alt="Jira Instances & Credentials Settings Overlay" />
+</p>
+
+Manage credentials, multi-instance tabs (e.g. *Avono*, *Sandbox*, *Sandbox*), custom JQL queries, connection test verification, and `.env` import.
 
 ---
 
@@ -28,7 +38,7 @@ No dock clutter, no window to manage. Slide the pointer to the right edge and th
 - **Embedded WebKit Experience (780×580)**: Native macOS `WKWebView` renders the complete Jira issue directly on screen. Clean user script removes global Atlassian navigation headers, giving you pure issue content.
 
 ### 🌐 Multi-Instance Jira Support
-- Manage multiple Jira Cloud & Data Center instances simultaneously (e.g. *Avono*, *Sandbox*, *Sandbox*).
+- Manage multiple Jira Cloud & Data Center instances simultaneously.
 - Color-coded instance beacons (Cyan, Purple, Amber, Emerald) and per-instance JQL filters.
 - Cycle through active instances with a single click on the header pill in Fan mode.
 
@@ -96,6 +106,7 @@ Generated artifacts are placed in `dist/`:
 jira-quick-access/
 ├── main.go                     # Application entry point & window initialization
 ├── build.sh                    # Multi-platform build & packaging automation
+├── docs/screenshots/           # UI screenshots for documentation
 ├── pkg/
 │   ├── jira/
 │   │   ├── client.go           # Multi-instance Jira REST API v3 client
