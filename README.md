@@ -1,90 +1,120 @@
-# 🚀 Jira Quick Access (gogpu/ui)
+# 🚀 Jira Quick Access
 
-A GPU-accelerated, native desktop companion for Jira Cloud inspired by **@nullbytes00**'s liquid-glass morphism aesthetics (SuperIsland / SuperCmd). Built with **Pure Go** and [`github.com/gogpu/ui`](https://github.com/gogpu/ui) with **Zero CGO dependencies**.
+Jira tickets that live at the edge of your screen. A high-performance native desktop companion built in Go with [gogpu/ui](https://github.com/gogpu/ui) and native macOS WebKit.
 
----
+No dock clutter, no window to manage. Slide the pointer to the right edge and the deck fans out.
 
-## ✨ Key Features & Aesthetic
-
-* **💎 Obsidian Liquid-Glass Morphism:**
-  * Translucent frosted glass panel with 1px ambient highlight borders and subtle specular reflections.
-  * Glowing status indicator halos:
-    * 🟢 **In Progress** (`#10B981` Emerald)
-    * 🟡 **In Review** (`#F59E0B` Amber)
-    * 🔵 **To Do** (`#38BDF8` Sky Blue)
-    * 🟣 **Done** (`#A855F7` Electric Purple)
-* **📐 Adaptive Multi-State Form Factor:**
-  * **Collapsed Rail (36px width):** Minimalist edge pill displaying settings gear, vertical glowing status dots for active tickets, and quick search trigger. Expands smoothly on hover (>150ms) or shortcut.
-  * **Expanded Drawer Panel (360px width):** Full command-center HUD with ticket cards, filters, quick transition dropdowns, and clipboard helpers.
-  * **Settings Modal Overlay:** Frosted configuration sheet for Jira Cloud Base URL, User Email, API Token, custom JQL query, polling intervals, and connection testing.
-* **⚡ Keyboard-First & Fast Workflow:**
-  * `Cmd+K` / Search bar: Instant fuzzy filter by ticket key, summary, or issue type.
-  * Quick filter tabs: `All`, `In Progress`, `Pinned`.
-  * `[📋 Key]`: Instant copy issue key (e.g. `PROJ-102`) to clipboard.
-  * `[📋 Branch]`: Instant copy sanitized Git branch name (e.g. `feature/PROJ-102-implement-oauth-pkce-flow`).
-  * `[↗]`: Open issue directly in browser.
-  * `[📌]`: Pin critical tickets to the top.
-  * `[ In Progress ▾ ]`: Dynamic workflow status transitions with optimistic UI updates.
-* **🔄 Jira REST API v3 Client & Demo Mode:**
-  * Supports Basic Auth with Atlassian API Token.
-  * Background polling sync with configurable interval and error backoff.
-  * Built-in rich interactive demo mode for instant offline showcase and testing.
+**[Download for macOS (Universal App & DMG)](dist/osx/)** · **[Windows & Linux Binaries](dist/)**
 
 ---
 
-## 🛠️ Multi-Platform Build Script (`build.sh`)
+| At rest | Fanned | A ticket pulled open |
+|---|---|---|
+| A 32 pt macOS Dock frosted capsule with instance beacons & proportional status gauges | Shingled pastel tabs with instant search, cycle headers & Dock-style hover lift | Full embedded ticket view in native WebKit with floating close button & side tabs |
 
-The application compiles natively across **macOS (Apple Silicon & Intel)**, **Windows (x86_64 & ARM64)**, and **Linux (x86_64 & ARM64)** with zero CGO dependencies.
+| State | What you see | Trigger |
+|---|---|---|
+| **Rest** | A 32 pt discrete frosted glass capsule on the right screen edge — glowing beacons, live ticket counts, and proportional status breakdown gauges (To Do / In Progress / Done) per instance | idle |
+| **Fan** | Ticket tabs shingle down the edge with instant search, multi-instance cycling, and animated Dock-style hover magnification | pointer enters the capsule |
+| **Expanded** | The ticket slides open in full size via embedded hardware-accelerated WebKit, stripped of bloated Jira navigation headers, level with its own side shelf | click a tab |
 
-### Build Everything:
+---
+
+## ✨ Features & Polish
+
+### 🏝️ 3-State Edge Rail Architecture
+- **Resting Capsule (32×224)**: Minimalist frosted glass capsule anchored to the screen edge. Features continuous 1.5px frosted white border stroke, instance beacon halos, centered count badges, and proportional gauge lines scaled against maximum workload.
+- **Interactive Fan Deck (120×H)**: Vertical tabs cascade down the edge. Resting the mouse over a tab triggers an organic **macOS Dock lift effect** — sliding 4px to the left with a radiant glowing border and vibrant indicator pill.
+- **Embedded WebKit Experience (780×580)**: Native macOS `WKWebView` renders the complete Jira issue directly on screen. Clean user script removes global Atlassian navigation headers, giving you pure issue content.
+
+### 🌐 Multi-Instance Jira Support
+- Manage multiple Jira Cloud & Data Center instances simultaneously (e.g. *Avono*, *Sandbox*, *Sandbox*).
+- Color-coded instance beacons (Cyan, Purple, Amber, Emerald) and per-instance JQL filters.
+- Cycle through active instances with a single click on the header pill in Fan mode.
+
+### ⌨️ Native Shortcuts & Copy-Paste Support
+Standard macOS clipboard shortcuts dispatch natively throughout embedded WebViews and input fields:
+
+| Shortcut | Action |
+|---|---|
+| `⌘V` | Paste (API tokens, OTP / 2FA verification codes, text) |
+| `⌘C` | Copy selected text or credentials |
+| `⌘A` | Select all |
+| `⌘Z` | Undo |
+| `Esc` / `⌘W` | Close expanded ticket view back to tabs, or collapse Fan deck to Rest capsule |
+| `Backspace` | Erase instant search query in Fan mode |
+| `Tab` / `Enter` | Cycle next field in Settings overlay |
+
+---
+
+## 🔒 Security & Privacy
+
+- **Local Storage Only**: Configurations and tokens are saved strictly to your local machine at `~/.jira-quick-access/config.json`.
+- **Zero Telemetry**: No tracking SDKs, no external servers, no analytics.
+- **Direct Atlassian API**: All requests travel directly between your machine and your configured Jira instances via TLS.
+- **Token Masking**: API tokens are masked in the UI (`AT••••••••••••00`) to prevent accidental shoulder surfing.
+
+---
+
+## 🛠️ Multi-Platform Build & Run
+
+Requires **Go 1.21+**. Zero external C libraries required on Windows and Linux; uses native Cocoa/WebKit on macOS.
+
+### Quick Start:
 ```bash
-./build.sh all
-```
-
-### Target-Specific Builds:
-```bash
-# macOS (ARM64, AMD64 & .app bundle + tar.gz)
-./build.sh osx
-
-# Windows (.exe & .zip)
-./build.sh win
-
-# Linux (ELF binary & tar.gz)
-./build.sh lin
-```
-
-### Run Locally:
-```bash
+# Run locally in development
 go run .
-```
 
-### Run Tests:
-```bash
+# Run test suite
 go test -v ./...
 ```
 
+### Build Release Packages:
+The bundled `build.sh` script automates cross-compilation across macOS, Windows, and Linux:
+
+```bash
+# Build all platforms
+./build.sh all
+
+# Platform-specific builds
+./build.sh osx    # macOS (ARM64 & x86_64 App Bundle + tar.gz)
+./build.sh win    # Windows (.exe & .zip)
+./build.sh lin    # Linux (ELF binary & tar.gz)
+```
+
+Generated artifacts are placed in `dist/`:
+- `dist/osx/Jira Quick Access.app`
+- `dist/osx/JiraQuickAccess-macOS-arm64.tar.gz`
+- `dist/win/jira-quick-access-windows-amd64.exe`
+- `dist/lin/jira-quick-access-linux-amd64`
+
 ---
 
-## 📁 Project Architecture
+## 📁 Architecture & Layout
 
 ```
 jira-quick-access/
-├── main.go                  # Main entry point & gogpu/ui bridge loop
-├── build.sh                 # Multi-platform build script (OSX/Win/Lin)
-├── instructions.md          # Architecture & state machine specification
+├── main.go                     # Application entry point & window initialization
+├── build.sh                    # Multi-platform build & packaging automation
 ├── pkg/
 │   ├── jira/
-│   │   ├── models.go        # Issue, Status, Transition, and Config data models
-│   │   ├── client.go        # Jira REST API v3 client & branch sanitization
-│   │   ├── mock.go          # Mock dataset & interactive demo transitions
-│   │   ├── storage.go       # Local config persistence (~/.jira-quick-access)
-│   │   └── jira_test.go     # Unit tests for Jira logic
-│   └── ui/
-│       ├── theme.go         # Liquid-glass tokens & status color palettes
-│       ├── components.go    # IssueCard, StatusDot, GlassButton, Toast widgets
-│       ├── rail_widget.go   # Collapsed 36px edge rail widget
-│       ├── panel_widget.go  # Expanded 360px panel widget
-│       ├── settings_widget.go # Glassmorphic settings overlay
-│       ├── app_view.go      # Root state orchestrator & clipboard bridges
-│       └── ui_test.go       # Layout & event unit tests
+│   │   ├── client.go           # Multi-instance Jira REST API v3 client
+│   │   ├── models.go           # Issue, InstanceConfig, Status & Theme models
+│   │   ├── storage.go          # Config serialization & .env loader
+│   │   └── mock.go             # Demo mock data generator
+│   ├── ui/
+│   │   ├── app_view.go         # 3-State root view, mouse tracking & Dock rendering
+│   │   ├── theme.go            # Glassmorphic pastel palettes & design tokens
+│   │   ├── components.go       # Toast notifications & UI helpers
+│   │   └── settings_widget.go  # Multi-instance credentials overlay
+│   └── window/
+│       ├── manager_darwin.go   # macOS Cocoa edge docking, WKWebView & Edit Menu
+│       ├── manager_windows.go  # Windows edge rail manager
+│       └── manager_fallback.go # Linux edge rail manager
 ```
+
+---
+
+## 📄 License
+
+MIT License — see [LICENSE](LICENSE) for details.
