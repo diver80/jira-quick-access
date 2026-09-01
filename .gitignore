@@ -1,0 +1,36 @@
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Binaries & Executables
+/jira-quick-access
+*.exe
+*.dll
+*.so
+*.dylib
+
+# macOS System Files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# IDEs & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary & Log files
+*.log
+/tmp/
+/scratch/
+
+# Go Test coverage & binaries
+*.test
+*.out
+coverage.html
