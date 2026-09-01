@@ -10,8 +10,11 @@ package window
 #include <QuartzCore/QuartzCore.h>
 #include <dispatch/dispatch.h>
 
+extern void goCollapseCallback(void);
+
 static NSWindow *g_appWindow = nil;
 static WKWebView *g_ticketWebView = nil;
+static NSButton *g_closeButton = nil;
 
 static void SetupDarwinEditMenu(void) {
     if ([NSApp mainMenu]) {
@@ -41,8 +44,9 @@ static void SetupDarwinEditMenu(void) {
     [mainMenu addItem:editMenuItem];
 }
 
-// Allow borderless HUD window to become key, receive text input, and handle Cmd+V/Cmd+C clipboard shortcuts
+// Allow borderless HUD window to become key, receive text input, and handle Escape / Cmd shortcuts
 @interface NSWindow (AllowKeyWindow)
+- (void)onCloseHUDClicked:(id)sender;
 @end
 
 @implementation NSWindow (AllowKeyWindow)
@@ -52,7 +56,16 @@ static void SetupDarwinEditMenu(void) {
 - (BOOL)canBecomeMainWindow {
     return YES;
 }
+- (void)onCloseHUDClicked:(id)sender {
+    goCollapseCallback();
+}
 - (BOOL)performKeyEquivalent:(NSEvent *)event {
+    // Escape key (keyCode 53) collapses view
+    if ([event keyCode] == 53) {
+        goCollapseCallback();
+        return YES;
+    }
+
     if (([event modifierFlags] & NSEventModifierFlagDeviceIndependentFlagsMask) == NSEventModifierFlagCommand) {
         NSString *chars = [event charactersIgnoringModifiers];
         if ([chars isEqualToString:@"v"]) {
@@ -65,6 +78,9 @@ static void SetupDarwinEditMenu(void) {
             if ([NSApp sendAction:@selector(selectAll:) to:nil from:self]) return YES;
         } else if ([chars isEqualToString:@"z"]) {
             if ([NSApp sendAction:@selector(undo:) to:nil from:self]) return YES;
+        } else if ([chars isEqualToString:@"w"]) {
+            goCollapseCallback();
+            return YES;
         }
     }
     return [super performKeyEquivalent:event];
@@ -85,10 +101,7 @@ static void ApplyDarwinWindowStyles(NSWindow *window) {
 
     SetupDarwinEditMenu();
 
-    // 1. Set style mask FIRST
     [window setStyleMask:NSWindowStyleMaskBorderless];
-
-    // 2. Clear background and opacity on the NSWindow
     [window setAcceptsMouseMovedEvents:YES];
     [window setOpaque:NO];
     [window setBackgroundColor:[NSColor clearColor]];
@@ -103,7 +116,6 @@ static void ApplyDarwinWindowStyles(NSWindow *window) {
 
     [window setLevel:NSFloatingWindowLevel];
 
-    // 3. Clear background and opacity on contentView, superviews, and layers
     NSView *contentView = [window contentView];
     if (contentView) {
         contentView.wantsLayer = YES;
@@ -216,6 +228,17 @@ static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
                     [g_ticketWebView.layer setCornerRadius:14.0];
                     [g_ticketWebView.layer setMasksToBounds:YES];
                     [contentView addSubview:g_ticketWebView];
+
+                    // Floating sleek Close button (✕)
+                    g_closeButton = [[NSButton alloc] initWithFrame:NSMakeRect(16, (CGFloat)(h - 44), 28, 28)];
+                    [g_closeButton setTitle:@"✕"];
+                    [g_closeButton setBezelStyle:NSBezelStyleCircular];
+                    [g_closeButton setButtonType:NSButtonTypeMomentaryPushIn];
+                    [g_closeButton setTarget:g_appWindow];
+                    [g_closeButton setAction:@selector(onCloseHUDClicked:)];
+                    [g_closeButton setWantsLayer:YES];
+                    [g_closeButton.layer setCornerRadius:14.0];
+                    [contentView addSubview:g_closeButton positioned:NSWindowAbove relativeTo:g_ticketWebView];
                 }
             }
             if (g_ticketWebView) {
@@ -225,12 +248,19 @@ static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
                 [g_ticketWebView setHidden:NO];
                 [g_ticketWebView evaluateJavaScript:kHideJiraHeaderScript completionHandler:nil];
             }
+            if (g_closeButton) {
+                [g_closeButton setFrame:NSMakeRect(16, (CGFloat)(h - 44), 28, 28)];
+                [g_closeButton setHidden:NO];
+            }
             if (g_appWindow) {
                 [g_appWindow makeKeyAndOrderFront:nil];
             }
         } else {
             if (g_ticketWebView) {
                 [g_ticketWebView setHidden:YES];
+            }
+            if (g_closeButton) {
+                [g_closeButton setHidden:YES];
             }
         }
     });
@@ -262,8 +292,30 @@ static void DarwinLoadMobileTicketHTML(const char *htmlStr, const char *baseURLS
 */
 import "C"
 import (
+	"sync"
 	"unsafe"
 )
+
+var (
+	collapseMu       sync.Mutex
+	collapseCallback func()
+)
+
+//export goCollapseCallback
+func goCollapseCallback() {
+	collapseMu.Lock()
+	cb := collapseCallback
+	collapseMu.Unlock()
+	if cb != nil {
+		cb()
+	}
+}
+
+func RegisterCollapseHandler(cb func()) {
+	collapseMu.Lock()
+	collapseCallback = cb
+	collapseMu.Unlock()
+}
 
 type DarwinManager struct {
 	state WindowState

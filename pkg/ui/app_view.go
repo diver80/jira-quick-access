@@ -92,6 +92,25 @@ func NewAppView(
 	v.SetEnabled(true)
 	v.SetBounds(geometry.NewRect(0, 0, 32, 224))
 
+	// Register collapse handler (for native close button and Escape key)
+	window.RegisterCollapseHandler(func() {
+		v.mu.Lock()
+		st := v.state
+		showSet := v.showSettings
+		v.mu.Unlock()
+
+		if showSet {
+			v.mu.Lock()
+			v.showSettings = false
+			v.mu.Unlock()
+			v.SetState(window.StateFan)
+		} else if st == window.StateExpanded {
+			v.SetState(window.StateFan)
+		} else if st == window.StateFan {
+			v.SetState(window.StateRest)
+		}
+	})
+
 	// Rock-solid OS-level mouse location poller for flawless Fan auto-collapse
 	go func() {
 		for {
@@ -698,8 +717,10 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		sTxtRect := geometry.NewRect(b.Min.X+12, b.Min.Y+38, w-24, 14)
 		canvas.DrawText(searchTxt, sTxtRect, 9, searchColor, false, widget.TextAlignLeft)
 
-		// Tab Area
-		tabStartY := b.Min.Y + float32(62) - scrollY
+		// Tab Area (Strictly bounded between top search and bottom settings tab)
+		tabMinY := b.Min.Y + float32(60)
+		tabMaxY := b.Min.Y + h - float32(50)
+		tabStartY := tabMinY - scrollY
 		tabHeight := float32(48)
 		tabGap := float32(6)
 
@@ -708,13 +729,14 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			canvas.DrawText("No tickets", noRect, 10, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignCenter)
 		} else {
 			for i, iss := range filteredIssues {
-				tabTheme := GetTicketTheme(i)
 				tabY := tabStartY + float32(i)*(tabHeight+tabGap)
 
-				if tabY+tabHeight < b.Min.Y+60 || tabY > b.Min.Y+h-54 {
+				// Clip strictly so overflow tabs never spill over the header or settings footer
+				if tabY < tabMinY-2 || tabY+tabHeight > tabMaxY+2 {
 					continue
 				}
 
+				tabTheme := GetTicketTheme(i)
 				tabRect := geometry.NewRect(b.Min.X+7, tabY, w-14, tabHeight)
 
 				canvas.DrawRoundRect(tabRect, tabTheme.Background, 8)
@@ -736,9 +758,10 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 
 		// Scroll Indicator
 		totalTabH := float32(len(filteredIssues)) * (tabHeight + tabGap)
-		viewTabH := h - 118
+		viewTabH := tabMaxY - tabMinY
 		if totalTabH > viewTabH && totalTabH > 0 {
-			scrollRatio := scrollY / (totalTabH - viewTabH)
+			maxScroll := totalTabH - viewTabH
+			scrollRatio := scrollY / maxScroll
 			if scrollRatio < 0 {
 				scrollRatio = 0
 			}
@@ -746,7 +769,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				scrollRatio = 1
 			}
 			thumbH := float32(24)
-			thumbY := b.Min.Y + float32(62) + scrollRatio*(viewTabH-thumbH)
+			thumbY := tabMinY + scrollRatio*(viewTabH-thumbH)
 			thumbRect := geometry.NewRect(b.Min.X+w-4, thumbY, 3, thumbH)
 			canvas.DrawRoundRect(thumbRect, widget.RGBA8(255, 255, 255, 140), 1.5)
 		}
@@ -777,8 +800,10 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	canvas.DrawRoundRect(dockShelfRect, widget.RGBA8(20, 28, 44, 175), 12)
 	canvas.StrokeRoundRect(dockShelfRect, widget.RGBA8(255, 255, 255, 80), 12, 1.5)
 
-	// Draw side tabs inside the dock shelf with scroll support
-	tabStartY := b.Min.Y + float32(16) - scrollY
+	// Draw side tabs inside the dock shelf with strict bounds clipping
+	tabMinY := b.Min.Y + float32(14)
+	tabMaxY := b.Min.Y + h - float32(56)
+	tabStartY := tabMinY - scrollY
 	tabHeight := float32(50)
 	tabGap := float32(7)
 
@@ -788,13 +813,14 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	}
 
 	for i, iss := range filteredIssues {
-		tabTheme := GetTicketTheme(i)
 		tabY := tabStartY + float32(i)*(tabHeight+tabGap)
 
-		if tabY+tabHeight < b.Min.Y+14 || tabY > b.Min.Y+h-58 {
+		// Clip strictly so overflow tabs never spill over the top rounded shelf edge or bottom settings tab
+		if tabY < tabMinY-2 || tabY+tabHeight > tabMaxY+2 {
 			continue
 		}
 
+		tabTheme := GetTicketTheme(i)
 		isActive := (iss.Key == activeKey && !showSettings)
 		tabWidth := tabBarWidth - 14
 		tabX := tabStartX + 2
@@ -826,9 +852,10 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 
 	// Scroll Indicator in Expanded Rail
 	totalRailH := float32(len(filteredIssues)) * (tabHeight + tabGap)
-	viewRailH := h - 76
+	viewRailH := tabMaxY - tabMinY
 	if totalRailH > viewRailH && totalRailH > 0 {
-		scrollRatio := scrollY / (totalRailH - viewRailH)
+		maxScroll := totalRailH - viewRailH
+		scrollRatio := scrollY / maxScroll
 		if scrollRatio < 0 {
 			scrollRatio = 0
 		}
@@ -836,7 +863,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			scrollRatio = 1
 		}
 		thumbH := float32(28)
-		thumbY := b.Min.Y + float32(16) + scrollRatio*(viewRailH-thumbH)
+		thumbY := tabMinY + scrollRatio*(viewRailH-thumbH)
 		thumbRect := geometry.NewRect(b.Min.X+w-6, thumbY, 3, thumbH)
 		canvas.DrawRoundRect(thumbRect, widget.RGBA8(255, 255, 255, 150), 1.5)
 	}
@@ -1093,17 +1120,18 @@ func (v *AppView) Event(ctx widget.Context, e event.Event) bool {
 		v.mu.Unlock()
 
 		if st == window.StateFan || st == window.StateExpanded {
-			tabHeight := float32(56)
-			totalH := float32(issueCount) * tabHeight
+			tabHeight := float32(50)
+			tabGap := float32(7)
+			totalH := float32(issueCount) * (tabHeight + tabGap)
 			b := v.Bounds()
-			viewH := b.Height() - 74
+			viewH := b.Height() - 110
 			maxScroll := totalH - viewH
 			if maxScroll < 0 {
 				maxScroll = 0
 			}
 
 			v.mu.Lock()
-			v.scrollY -= ev.Delta.Y * 0.7
+			v.scrollY -= ev.Delta.Y * 0.8
 			if v.scrollY < 0 {
 				v.scrollY = 0
 			}
@@ -1230,13 +1258,15 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 			return true
 		}
 
-		tabStartY := b.Min.Y + float32(62) - scrollY
+		tabMinY := b.Min.Y + float32(60)
+		tabMaxY := b.Min.Y + h - float32(50)
+		tabStartY := tabMinY - scrollY
 		tabHeight := float32(48)
 		tabGap := float32(6)
 
 		for i, fIss := range filteredIssues {
 			tabY := tabStartY + float32(i)*(tabHeight+tabGap)
-			if tabY+tabHeight < b.Min.Y+60 || tabY > b.Min.Y+h-54 {
+			if tabY < tabMinY-2 || tabY+tabHeight > tabMaxY+2 {
 				continue
 			}
 			tabRect := geometry.NewRect(b.Min.X+7, tabY, w-14, tabHeight)
@@ -1267,19 +1297,26 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		return true
 	}
 
-	tabStartY := b.Min.Y + float32(16) - scrollY
+	tabMinY := b.Min.Y + float32(14)
+	tabMaxY := b.Min.Y + h - float32(56)
+	tabStartY := tabMinY - scrollY
 	tabHeight := float32(50)
 	tabGap := float32(7)
 
 	for i, iss := range filteredIssues {
 		tabY := tabStartY + float32(i)*(tabHeight+tabGap)
-		if tabY+tabHeight < b.Min.Y+14 || tabY > b.Min.Y+h-58 {
+		if tabY < tabMinY-2 || tabY+tabHeight > tabMaxY+2 {
 			continue
 		}
 		tabRect := geometry.NewRect(tabStartX, tabY, tabBarWidth-4, tabHeight)
 		if tabRect.Contains(pos) {
 			for origIdx, oIss := range allIssues {
 				if oIss.Key == iss.Key {
+					// Toggle / collapse back if active tab is clicked again
+					if v.activeIdx == origIdx && !showSettings {
+						v.SetState(window.StateFan)
+						return true
+					}
 					v.Expand(origIdx)
 					return true
 				}
