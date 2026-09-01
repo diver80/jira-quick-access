@@ -119,6 +119,15 @@ static void DarwinDockToRightEdge(int width, int height, int state) {
     });
 }
 
+static int DarwinIsMouseInsideWindow(void) {
+    if (!g_appWindow) return 0;
+    NSPoint mouseLoc = [NSEvent mouseLocation];
+    NSRect winFrame = [g_appWindow frame];
+    // Inset slightly by -6 to provide a stable hit-test buffer
+    NSRect hitFrame = NSInsetRect(winFrame, -6, -6);
+    return NSPointInRect(mouseLoc, hitFrame) ? 1 : 0;
+}
+
 static NSString *const kHideJiraHeaderScript =
     @"var css = 'header, #ak-jira-navigation, nav[aria-label=\"Global\"], "
     @"[data-testid=\"GlobalNavigation\"], [data-test-id=\"global-pages.header\"], "
@@ -233,6 +242,10 @@ func (m *DarwinManager) DockToRightEdge(width, height int) {
 
 func (m *DarwinManager) OpenTicketURL(url string) error {
 	return OpenURL(url)
+}
+
+func IsMouseInside() bool {
+	return C.DarwinIsMouseInsideWindow() != 0
 }
 
 func SetMobileWebViewVisible(visible bool, width, height int) {

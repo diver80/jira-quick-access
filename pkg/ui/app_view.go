@@ -18,8 +18,8 @@ import (
 )
 
 // AppView implements the 3-state edge architecture with multi-instance support & macOS Dock styling:
-// 1. Rest: Sleek discrete macOS Dock capsule with separate instance counts & proportional gauges (32x224)
-// 2. Fan: Shingled vertical tabs down the edge with instant search & scroll indicator (120xH)
+// 1. Rest: Sleek discrete macOS Dock capsule with complete crisp frosted border & proportional gauges (32x224)
+// 2. Fan: Shingled vertical tabs down the edge with instant search & rock-solid mouse tracking (120xH)
 // 3. Expanded: Full floating card / native mobile webview level with its tab (780x580)
 type AppView struct {
 	widget.WidgetBase
@@ -92,18 +92,24 @@ func NewAppView(
 	v.SetEnabled(true)
 	v.SetBounds(geometry.NewRect(0, 0, 32, 224))
 
-	// Stable debounce timer: collapse Fan state back to Rest ONLY after 350ms of true inactivity
+	// Rock-solid OS-level mouse location poller for flawless Fan auto-collapse
 	go func() {
 		for {
-			time.Sleep(60 * time.Millisecond)
+			time.Sleep(50 * time.Millisecond)
 			v.mu.Lock()
 			st := v.state
 			lastH := v.lastHover
 			searchAct := v.searchActive || v.searchQuery != ""
 			v.mu.Unlock()
 
-			if st == window.StateFan && !searchAct && !lastH.IsZero() && time.Since(lastH) > 350*time.Millisecond {
-				v.SetState(window.StateRest)
+			if st == window.StateFan && !searchAct {
+				if window.IsMouseInside() {
+					v.mu.Lock()
+					v.lastHover = time.Now()
+					v.mu.Unlock()
+				} else if !lastH.IsZero() && time.Since(lastH) > 300*time.Millisecond {
+					v.SetState(window.StateRest)
+				}
 			}
 		}
 	}()
@@ -229,7 +235,7 @@ func (v *AppView) SetState(newState window.WindowState) {
 	v.mu.Unlock()
 
 	w, h := v.computeSize(newState)
-	// Immediately update bounds to prevent mouse event hit-test race condition
+	// Synchronously update bounds to eliminate any hit-test race conditions
 	v.SetBounds(geometry.NewRect(0, 0, float32(w), float32(h)))
 
 	if window.DefaultManager != nil {
@@ -477,14 +483,17 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	filteredIssues := v.getFilteredIssues()
 
 	// =========================================================================
-	// 1. STATE REST: macOS Dock Glass Capsule (32x224)
+	// 1. STATE REST: macOS Dock Glass Capsule with Complete Crisp White Border
 	// =========================================================================
 	if st == window.StateRest {
-		pillRect := geometry.NewRect(b.Min.X, b.Min.Y, w, h)
-		// 1. Frosted deep glass background
-		canvas.DrawRoundRect(pillRect, widget.RGBA8(16, 22, 34, 240), 16)
-		// 2. Crisp macOS Dock frosted border
-		canvas.StrokeRoundRect(pillRect, widget.RGBA8(255, 255, 255, 65), 16, 1.5)
+		// Inset pill by 1px on all sides so the stroke is 100% visible and unclipped
+		pillRect := geometry.NewRect(b.Min.X+1.0, b.Min.Y+1.0, w-2.0, h-2.0)
+		pillRadius := float32(15.0)
+
+		// 1. Deep frosted glass backdrop
+		canvas.DrawRoundRect(pillRect, widget.RGBA8(16, 22, 34, 245), pillRadius)
+		// 2. Complete, crisp, prominent frosted white border all the way around
+		canvas.StrokeRoundRect(pillRect, widget.RGBA8(255, 255, 255, 120), pillRadius, 1.5)
 
 		instCount := len(instances)
 		if instCount == 0 {
@@ -553,18 +562,18 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				badgeBorder = widget.RGBA8(34, 197, 94, 140)
 			}
 
-			// Instance Beacon Core & Radiant Glow (Center at X+16)
+			// Instance Beacon Core & Radiant Glow (Centered at X: 16)
 			beaconCenter := geometry.Pt(b.Min.X+w/2, secY+8)
 			canvas.DrawCircle(beaconCenter, 6.0, beaconGlow)
 			canvas.DrawCircle(beaconCenter, 3.5, beaconColor)
 
-			// Proportional 2:23:6 Gauge Indicator on Left Edge (Inside capsule, inset at X+3.5)
+			// Proportional 2:23:6 Gauge Indicator Inset at X+5.5 (Doesn't touch the white border!)
 			lineTopY := secY + 3
 			lineBottomY := secY + instSectionH - 5
 			lineTotalH := lineBottomY - lineTopY
 
-			// 1. Draw background full track in subtle dim tone
-			canvas.DrawLine(geometry.Pt(b.Min.X+3.5, lineTopY), geometry.Pt(b.Min.X+3.5, lineBottomY), trackColor, 2.5)
+			// 1. Background full track
+			canvas.DrawLine(geometry.Pt(b.Min.X+5.5, lineTopY), geometry.Pt(b.Min.X+5.5, lineBottomY), trackColor, 2.0)
 
 			// 2. Scale line height proportionally to maxCount (e.g. 2/23 vs 23/23 vs 6/23)
 			ratio := float32(count) / float32(maxCount)
@@ -593,42 +602,42 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				// In Progress segment
 				if inProgCount > 0 {
 					segH := fillH * (float32(inProgCount) / float32(count))
-					canvas.DrawLine(geometry.Pt(b.Min.X+3.5, curY), geometry.Pt(b.Min.X+3.5, curY+segH), inProgColor, 2.5)
+					canvas.DrawLine(geometry.Pt(b.Min.X+5.5, curY), geometry.Pt(b.Min.X+5.5, curY+segH), inProgColor, 2.0)
 					curY += segH
 				}
 				// To Do segment
 				if todoCount > 0 {
 					segH := fillH * (float32(todoCount) / float32(count))
-					canvas.DrawLine(geometry.Pt(b.Min.X+3.5, curY), geometry.Pt(b.Min.X+3.5, curY+segH), todoColor, 2.5)
+					canvas.DrawLine(geometry.Pt(b.Min.X+5.5, curY), geometry.Pt(b.Min.X+5.5, curY+segH), todoColor, 2.0)
 					curY += segH
 				}
 				// Done segment
 				if doneCount > 0 {
 					segH := fillH * (float32(doneCount) / float32(count))
-					canvas.DrawLine(geometry.Pt(b.Min.X+3.5, curY), geometry.Pt(b.Min.X+3.5, curY+segH), widget.RGBA8(34, 197, 94, 255), 2.5)
+					canvas.DrawLine(geometry.Pt(b.Min.X+5.5, curY), geometry.Pt(b.Min.X+5.5, curY+segH), widget.RGBA8(34, 197, 94, 255), 2.0)
 				}
 			}
 
-			// Clean Centered Ticket Count Badge Pill
+			// Clean Centered Ticket Count Badge Pill (X: 10..29)
 			countStr := fmt.Sprintf("%d", count)
-			badgeW := float32(23)
+			badgeW := float32(19)
 			badgeH := float32(18)
-			badgeX := b.Min.X + (w-badgeW)/2 + 1.5
+			badgeX := b.Min.X + 9.5
 			countBox := geometry.NewRect(badgeX, secY+18, badgeW, badgeH)
 			canvas.DrawRoundRect(countBox, badgeBg, 5)
 			canvas.StrokeRoundRect(countBox, badgeBorder, 5, 1.0)
-			canvas.DrawText(countStr, geometry.NewRect(badgeX, secY+20, badgeW, badgeH-2), 11, widget.RGBA8(245, 250, 255, 255), true, widget.TextAlignCenter)
+			canvas.DrawText(countStr, geometry.NewRect(badgeX, secY+20, badgeW, badgeH-2), 10, widget.RGBA8(245, 250, 255, 255), true, widget.TextAlignCenter)
 
 			// Subtle Divider between instances
 			if idx < len(instances)-1 {
 				sepY := secY + instSectionH - 2
-				canvas.DrawLine(geometry.Pt(b.Min.X+6, sepY), geometry.Pt(b.Min.X+w-6, sepY), widget.RGBA8(255, 255, 255, 30), 1.0)
+				canvas.DrawLine(geometry.Pt(b.Min.X+7, sepY), geometry.Pt(b.Min.X+w-7, sepY), widget.RGBA8(255, 255, 255, 30), 1.0)
 			}
 		}
 
 		// Divider before settings
 		dividerY := b.Min.Y + h - 28
-		canvas.DrawLine(geometry.Pt(b.Min.X+6, dividerY), geometry.Pt(b.Min.X+w-6, dividerY), widget.RGBA8(255, 255, 255, 45), 1.0)
+		canvas.DrawLine(geometry.Pt(b.Min.X+7, dividerY), geometry.Pt(b.Min.X+w-7, dividerY), widget.RGBA8(255, 255, 255, 45), 1.0)
 
 		// Settings Cog Icon
 		settingsCenter := geometry.Pt(b.Min.X+w/2, b.Min.Y+h-14)
@@ -641,9 +650,9 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	// 2. STATE FAN: Vertical Dock Tabs with Instance Header & Search (120xH)
 	// =========================================================================
 	if st == window.StateFan {
-		railBackdrop := geometry.NewRect(b.Min.X, b.Min.Y, w, h)
+		railBackdrop := geometry.NewRect(b.Min.X+1.0, b.Min.Y+1.0, w-2.0, h-2.0)
 		canvas.DrawRoundRect(railBackdrop, widget.RGBA8(20, 28, 44, 200), 14)
-		canvas.StrokeRoundRect(railBackdrop, widget.RGBA8(255, 255, 255, 65), 14, 1.5)
+		canvas.StrokeRoundRect(railBackdrop, widget.RGBA8(255, 255, 255, 100), 14, 1.5)
 
 		// Top Instance Header Pill
 		instName := "All Instances"
@@ -766,7 +775,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	tabStartX := b.Min.X + w - tabBarWidth
 	dockShelfRect := geometry.NewRect(tabStartX-2, b.Min.Y+8, tabBarWidth-4, h-16)
 	canvas.DrawRoundRect(dockShelfRect, widget.RGBA8(20, 28, 44, 175), 12)
-	canvas.StrokeRoundRect(dockShelfRect, widget.RGBA8(255, 255, 255, 65), 12, 1.5)
+	canvas.StrokeRoundRect(dockShelfRect, widget.RGBA8(255, 255, 255, 80), 12, 1.5)
 
 	// Draw side tabs inside the dock shelf with scroll support
 	tabStartY := b.Min.Y + float32(16) - scrollY
@@ -883,7 +892,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 func (v *AppView) drawSettingsOverlay(ctx widget.Context, canvas widget.Canvas, r geometry.Rect) {
 	radius := float32(14)
 	canvas.DrawRoundRect(r, widget.RGBA8(18, 22, 32, 250), radius)
-	canvas.StrokeRoundRect(r, widget.RGBA8(255, 255, 255, 55), radius, 1.0)
+	canvas.StrokeRoundRect(r, widget.RGBA8(255, 255, 255, 70), radius, 1.0)
 
 	// 1. Header Title & Top Controls
 	hdrRect := geometry.NewRect(r.Min.X+20, r.Min.Y+14, 250, 22)

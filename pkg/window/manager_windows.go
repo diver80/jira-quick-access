@@ -62,6 +62,7 @@ func (m *WindowsManager) OpenTicketURL(url string) error {
 	return OpenURL(url)
 }
 
+func IsMouseInside() bool                                     { return true }
 func SetMobileWebViewVisible(visible bool, width, height int) {}
 func LoadMobileTicketView(url string)                         {}
 func LoadMobileTicketHTML(html, baseURL string)               {}
