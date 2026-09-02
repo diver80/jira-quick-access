@@ -144,7 +144,7 @@ func TestEnsureInstancesEdgeCases(t *testing.T) {
 	if len(emptyCfg.Instances) != 1 {
 		t.Fatalf("expected 1 default instance, got %d", len(emptyCfg.Instances))
 	}
-	if emptyCfg.Instances[0].ID != "inst-1" || emptyCfg.Instances[0].Name != "Avono" {
+	if emptyCfg.Instances[0].ID != "inst-1" || emptyCfg.Instances[0].Name != "avono" {
 		t.Errorf("unexpected default instance: %+v", emptyCfg.Instances[0])
 	}
 	if emptyCfg.ActiveInstID != "inst-1" {
@@ -260,12 +260,12 @@ func TestVerifyInstanceConnection(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"displayName":"Frank Hess","emailAddress":"frank@avono.de","name":"fhess"}`)
+		fmt.Fprintf(w, `{"displayName":"Frank Hess","emailAddress":"frank.hess@avono.de","name":"fhess"}`)
 	}))
 	defer tsSuccess.Close()
 
 	client := NewClient(DefaultConfig())
-	name, err := client.VerifyInstanceConnection(context.Background(), tsSuccess.URL, "frank@avono.de", "token123")
+	name, err := client.VerifyInstanceConnection(context.Background(), tsSuccess.URL, "frank.hess@avono.de", "token123")
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -276,16 +276,16 @@ func TestVerifyInstanceConnection(t *testing.T) {
 	// 2. Fallback to email when DisplayName is missing
 	tsEmailFallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"displayName":"","emailAddress":"frank@avono.de","name":""}`)
+		fmt.Fprintf(w, `{"displayName":"","emailAddress":"frank.hess@avono.de","name":""}`)
 	}))
 	defer tsEmailFallback.Close()
 
-	name, err = client.VerifyInstanceConnection(context.Background(), tsEmailFallback.URL, "frank@avono.de", "token123")
+	name, err = client.VerifyInstanceConnection(context.Background(), tsEmailFallback.URL, "frank.hess@avono.de", "token123")
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
-	if name != "frank@avono.de" {
-		t.Errorf("expected 'frank@avono.de', got %q", name)
+	if name != "frank.hess@avono.de" {
+		t.Errorf("expected 'frank.hess@avono.de', got %q", name)
 	}
 
 	// 3. Missing BaseURL or Token error

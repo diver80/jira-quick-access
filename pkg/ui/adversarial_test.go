@@ -65,19 +65,19 @@ func TestAppViewMultiInstanceSettingsInteractions(t *testing.T) {
 		Instances: []jira.InstanceConfig{
 			{
 				ID:       "inst-1",
-				Name:     "Avono",
+				Name:     "avono",
 				BaseURL:  "https://avono.atlassian.net",
-				Email:    "frank@avono.de",
+				Email:    "frank.hess@avono.de",
 				APIToken: "token-avono",
 				JQLQuery: "assignee = currentUser()",
 			},
 			{
 				ID:       "inst-2",
-				Name:     "Sandbox",
-				BaseURL:  "https://example.atlassian.net",
-				Email:    "frank@example.com",
-				APIToken: "token-mock",
-				JQLQuery: "project = MOCK",
+				Name:     "avono DC",
+				BaseURL:  "https://jira.avono.de",
+				Email:    "frank.hess@avono.de",
+				APIToken: "token-dc",
+				JQLQuery: "project = AVN",
 			},
 		},
 	}
@@ -89,24 +89,24 @@ func TestAppViewMultiInstanceSettingsInteractions(t *testing.T) {
 
 	// 1. Check loaded initial fields for inst-1
 	view.mu.Lock()
-	if view.nameVal != "Avono" || view.urlVal != "https://avono.atlassian.net" {
-		t.Errorf("expected Avono fields loaded, got name=%q, url=%q", view.nameVal, view.urlVal)
+	if view.nameVal != "avono" || view.urlVal != "https://avono.atlassian.net" {
+		t.Errorf("expected avono fields loaded, got name=%q, url=%q", view.nameVal, view.urlVal)
 	}
 	view.mu.Unlock()
 
-	// 2. Switch to tab index 1 (Sandbox)
+	// 2. Switch to tab index 1 (avono DC)
 	view.mu.Lock()
 	view.saveCurrentInstanceFieldsLocked()
 	view.loadInstanceFieldsLocked(1)
 	view.mu.Unlock()
 
 	view.mu.Lock()
-	if view.nameVal != "Sandbox" || view.urlVal != "https://example.atlassian.net" {
-		t.Errorf("expected Sandbox fields loaded, got name=%q, url=%q", view.nameVal, view.urlVal)
+	if view.nameVal != "avono DC" || view.urlVal != "https://jira.avono.de" {
+		t.Errorf("expected avono DC fields loaded, got name=%q, url=%q", view.nameVal, view.urlVal)
 	}
 	view.mu.Unlock()
 
-	// 3. Edit field value for Sandbox
+	// 3. Edit field value for avono DC
 	view.mu.Lock()
 	view.activeField = 1 // Name field
 	view.mu.Unlock()
@@ -118,8 +118,8 @@ func TestAppViewMultiInstanceSettingsInteractions(t *testing.T) {
 	}
 
 	view.mu.Lock()
-	if view.nameVal != "Sandbox Server" {
-		t.Errorf("expected nameVal 'Sandbox Server', got %q", view.nameVal)
+	if view.nameVal != "avono DC Server" {
+		t.Errorf("expected nameVal 'avono DC Server', got %q", view.nameVal)
 	}
 	view.saveCurrentInstanceFieldsLocked()
 	view.mu.Unlock()
@@ -129,9 +129,9 @@ func TestAppViewMultiInstanceSettingsInteractions(t *testing.T) {
 	view.config.Instances = append(view.config.Instances, jira.InstanceConfig{
 		ID:       "inst-3",
 		Name:     "Sandbox",
-		BaseURL:  "https://example.atlassian.net",
-		Email:    "frank@example.com",
-		APIToken: "token-mock",
+		BaseURL:  "https://sandbox.atlassian.net",
+		Email:    "frank@sandbox.de",
+		APIToken: "token-sandbox",
 	})
 	view.loadInstanceFieldsLocked(2)
 	view.mu.Unlock()

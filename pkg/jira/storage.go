@@ -102,6 +102,13 @@ func LoadConfig() Config {
 			cfg.DemoMode = saved.DemoMode
 			cfg.DebugMode = saved.DebugMode
 		}
+	} else {
+		// First launch: No config.json exists on disk yet.
+		// Check if .env supplies credentials; otherwise enable Demo Mode for out-of-the-box preview.
+		hasDotEnv := LoadFromDotEnv(&cfg)
+		if !hasDotEnv && (len(cfg.Instances) == 0 || cfg.Instances[0].APIToken == "") {
+			cfg.DemoMode = true
+		}
 	}
 
 	cfg.EnsureInstances()

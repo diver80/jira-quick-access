@@ -35,11 +35,18 @@ clean() {
     echo -e "${YELLOW}🧹 Cleaning dist directory...${NC}"
     rm -rf "${DIST_DIR}"
     mkdir -p "${DIST_DIR}"
+    touch "${DIST_DIR}/.metadata_never_index"
 }
 
 build_osx() {
-    echo -e "${BLUE}🍎 Building for macOS (Darwin)...${NC}"
+    echo -e "${BLUE}🍎 Building for macOS (Darwin Universal 2)...${NC}"
     
+    # 0. Ensure icons are present
+    if [ ! -f "assets/AppIcon.icns" ]; then
+        echo -e "   -> Generating AppIcon.icns from assets/generate_icon.py..."
+        python3 assets/generate_icon.py
+    fi
+
     # 1. ARM64 (Apple Silicon: M1/M2/M3/M4)
     echo -e "   -> Compiling darwin/arm64..."
     mkdir -p "${DIST_DIR}/osx/arm64"
@@ -57,14 +64,28 @@ build_osx() {
     mkdir -p "${APP_BUNDLE}/Contents/MacOS"
     mkdir -p "${APP_BUNDLE}/Contents/Resources"
     
-    HOST_ARCH=$(uname -m)
-    if [ "${HOST_ARCH}" = "arm64" ]; then
-        cp "${DIST_DIR}/osx/arm64/${APP_NAME}" "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
+    # Universal 2 Binary (runs natively on Apple Silicon and Intel)
+    if command -v lipo >/dev/null 2>&1; then
+        echo -e "   -> Creating Universal 2 binary with lipo (arm64 + x86_64)..."
+        lipo -create -output "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}" \
+            "${DIST_DIR}/osx/arm64/${APP_NAME}" \
+            "${DIST_DIR}/osx/amd64/${APP_NAME}"
     else
-        cp "${DIST_DIR}/osx/amd64/${APP_NAME}" "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
+        HOST_ARCH=$(uname -m)
+        if [ "${HOST_ARCH}" = "arm64" ]; then
+            cp "${DIST_DIR}/osx/arm64/${APP_NAME}" "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
+        else
+            cp "${DIST_DIR}/osx/amd64/${APP_NAME}" "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
+        fi
     fi
     chmod +x "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
     
+    # Copy App Icon into bundle
+    if [ -f "assets/AppIcon.icns" ]; then
+        echo -e "   -> Installing AppIcon.icns to Resources..."
+        cp "assets/AppIcon.icns" "${APP_BUNDLE}/Contents/Resources/AppIcon.icns"
+    fi
+
     cat <<EOF > "${APP_BUNDLE}/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -74,6 +95,10 @@ build_osx() {
     <string>en</string>
     <key>CFBundleExecutable</key>
     <string>${APP_NAME}</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>${BUNDLE_ID}</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -86,6 +111,8 @@ build_osx() {
     <string>${VERSION}</string>
     <key>CFBundleVersion</key>
     <string>${VERSION}</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>LSUIElement</key>
@@ -94,11 +121,28 @@ build_osx() {
 </plist>
 EOF
 
+    # 4. Create DMG Installer
+    if command -v hdiutil >/dev/null 2>&1; then
+        echo -e "   -> Building macOS DMG installer (with /Applications drag-and-drop)..."
+        DMG_STAGING="${DIST_DIR}/osx/dmg_staging"
+        DMG_FILE="${DIST_DIR}/osx/${APP_DISPLAY_NAME}-v${VERSION}-macOS-Universal.dmg"
+        rm -rf "${DMG_STAGING}" "${DMG_FILE}"
+        mkdir -p "${DMG_STAGING}"
+        cp -R "${APP_BUNDLE}" "${DMG_STAGING}/"
+        ln -s /Applications "${DMG_STAGING}/Applications"
+        
+        hdiutil create -volname "${APP_DISPLAY_NAME}" \
+            -srcfolder "${DMG_STAGING}" \
+            -ov -format UDZO \
+            "${DMG_FILE}" >/dev/null
+        rm -rf "${DMG_STAGING}"
+    fi
+
     cd "${DIST_DIR}/osx"
-    tar -czf "JiraQuickAccess-macOS-arm64.tar.gz" -C "${DIST_DIR}/osx" "${APP_DISPLAY_NAME}.app"
+    tar -czf "JiraQuickAccess-macOS-Universal.tar.gz" -C "${DIST_DIR}/osx" "${APP_DISPLAY_NAME}.app"
     cd - > /dev/null
 
-    echo -e "${GREEN}✓ macOS build completed!${NC}"
+    echo -e "${GREEN}✓ macOS build & DMG completed!${NC}"
 }
 
 build_win() {
@@ -135,6 +179,25 @@ build_lin() {
     echo -e "${GREEN}✓ Linux build completed!${NC}"
 }
 
+install_osx() {
+    build_osx
+    echo -e "${BLUE}📲 Installing ${APP_DISPLAY_NAME} to /Applications...${NC}"
+    APP_BUNDLE="${DIST_DIR}/osx/${APP_DISPLAY_NAME}.app"
+    DEST_APP="/Applications/${APP_DISPLAY_NAME}.app"
+    
+    # If running, terminate previous instance
+    pkill -f "${APP_NAME}" 2>/dev/null || true
+    
+    rm -rf "${DEST_APP}"
+    cp -R "${APP_BUNDLE}" "/Applications/"
+    
+    # Remove quarantine flag for local build
+    xattr -dr com.apple.quarantine "${DEST_APP}" 2>/dev/null || true
+    
+    echo -e "${GREEN}✓ Successfully installed to ${DEST_APP}!${NC}"
+    echo -e "${CYAN}💡 You can now launch it via Spotlight (⌘+Space -> 'Jira Quick Access') or Applications folder.${NC}"
+}
+
 print_summary() {
     echo ""
     echo -e "${GREEN}${BOLD}🎉 Build Successful! Release artifacts generated in ${DIST_DIR}:${NC}"
@@ -150,12 +213,14 @@ print_usage() {
     echo "Usage: ./build.sh [target]"
     echo ""
     echo "Targets:"
-    echo "  all        Build for all platforms (osx, win, lin) [Default]"
-    echo "  osx, mac   Build for macOS (ARM64, AMD64 & .app bundle)"
-    echo "  win        Build for Windows (x86_64 & ARM64 .exe)"
-    echo "  lin, linux Build for Linux (x86_64 & ARM64 ELF)"
-    echo "  clean      Clean previous build artifacts"
-    echo "  help       Show this help message"
+    echo "  all          Build for all platforms (osx, win, lin) [Default]"
+    echo "  osx, mac     Build for macOS (Universal 2 .app bundle & .dmg installer)"
+    echo "  install      Build and install directly to /Applications on this Mac"
+    echo "  dmg          Build macOS DMG drag-and-drop installer"
+    echo "  win          Build for Windows (x86_64 & ARM64 .exe)"
+    echo "  lin, linux   Build for Linux (x86_64 & ARM64 ELF)"
+    echo "  clean        Clean previous build artifacts"
+    echo "  help         Show this help message"
     echo ""
 }
 
@@ -163,7 +228,11 @@ print_banner
 TARGET="${1:-all}"
 
 case "$TARGET" in
-    osx|mac|darwin)
+    install)
+        mkdir -p "${DIST_DIR}"
+        install_osx
+        ;;
+    osx|mac|darwin|dmg)
         mkdir -p "${DIST_DIR}"
         build_osx
         print_summary
@@ -198,3 +267,4 @@ case "$TARGET" in
         exit 1
         ;;
 esac
+

@@ -72,19 +72,19 @@ func createTestAppView() (*AppView, *jira.Client) {
 		Instances: []jira.InstanceConfig{
 			{
 				ID:       "inst-1",
-				Name:     "Avono Cloud",
+				Name:     "avono cloud",
 				BaseURL:  "https://avono.atlassian.net",
-				Email:    "frank@avono.de",
+				Email:    "frank.hess@avono.de",
 				APIToken: "token-avono",
-				JQLQuery: "assignee = currentUser()",
+				JQLQuery: "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC",
 			},
 			{
 				ID:       "inst-2",
-				Name:     "Sandbox DC",
-				BaseURL:  "https://jira.sandbox.de",
-				Email:    "frank@example.com",
-				APIToken: "token-mock",
-				JQLQuery: "project = MOCK",
+				Name:     "avono DC",
+				BaseURL:  "https://jira.avono.de",
+				Email:    "frank.hess@avono.de",
+				APIToken: "token-dc",
+				JQLQuery: "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC",
 			},
 		},
 		ActiveInstID: "inst-1",
@@ -204,8 +204,8 @@ func TestAppViewFilterMemoizationAndInvalidation(t *testing.T) {
 			Pinned:       false,
 		},
 		{
-			Key:          "MOCK-201",
-			Summary:      "Migrate Oracle Database to PostgreSQL",
+			Key:          "AVN-201",
+			Summary:      "Migrate Database to PostgreSQL",
 			InstanceID:   "inst-2",
 			Status:       jira.Status{Name: "In Review", CategoryKey: "indeterminate"},
 			Priority:     jira.Priority{Name: "Medium"},
@@ -214,7 +214,7 @@ func TestAppViewFilterMemoizationAndInvalidation(t *testing.T) {
 			Pinned:       false,
 		},
 		{
-			Key:          "MOCK-202",
+			Key:          "AVN-202",
 			Summary:      "Data Center Rest v2 API Endpoints",
 			InstanceID:   "inst-2",
 			Status:       jira.Status{Name: "Done", CategoryKey: "done"},
@@ -224,11 +224,11 @@ func TestAppViewFilterMemoizationAndInvalidation(t *testing.T) {
 			Pinned:       true,
 		},
 	}
-	view.activeInstIdx = 0 // "inst-1" (Avono)
+	view.activeInstIdx = 0 // "inst-1" (avono)
 	view.invalidateFilterCacheLocked()
 	view.mu.Unlock()
 
-	// 1. Initial filtered issues for Instance 0 (Avono) -> AVN-101 and AVN-102
+	// 1. Initial filtered issues for Instance 0 (avono) -> AVN-101 and AVN-102
 	filtered := view.getFilteredIssues()
 	if len(filtered) != 2 {
 		t.Fatalf("expected 2 issues for instance 0, got %d", len(filtered))
@@ -281,7 +281,7 @@ func TestAppViewFilterMemoizationAndInvalidation(t *testing.T) {
 		t.Fatalf("expected 1 issue AVN-101 for '101', got %+v", filtered)
 	}
 
-	// 6. Switch to Instance 1 (Sandbox)
+	// 6. Switch to Instance 1 (avono DC)
 	view.mu.Lock()
 	view.activeInstIdx = 1
 	view.searchQuery = ""
@@ -290,10 +290,10 @@ func TestAppViewFilterMemoizationAndInvalidation(t *testing.T) {
 
 	filtered = view.getFilteredIssues()
 	if len(filtered) != 2 {
-		t.Fatalf("expected 2 issues for Sandbox, got %d", len(filtered))
+		t.Fatalf("expected 2 issues for avono DC, got %d", len(filtered))
 	}
-	if filtered[0].Key != "MOCK-201" || filtered[1].Key != "MOCK-202" {
-		t.Errorf("unexpected issues for Sandbox: %+v", filtered)
+	if filtered[0].Key != "AVN-201" || filtered[1].Key != "AVN-202" {
+		t.Errorf("unexpected issues for avono DC: %+v", filtered)
 	}
 
 	// 7. Search on Instance 1 for "postgres"
@@ -303,8 +303,8 @@ func TestAppViewFilterMemoizationAndInvalidation(t *testing.T) {
 	view.mu.Unlock()
 
 	filtered = view.getFilteredIssues()
-	if len(filtered) != 1 || filtered[0].Key != "MOCK-201" {
-		t.Fatalf("expected 1 issue MOCK-201 for 'postgres', got %+v", filtered)
+	if len(filtered) != 1 || filtered[0].Key != "AVN-201" {
+		t.Fatalf("expected 1 issue AVN-201 for 'postgres', got %+v", filtered)
 	}
 }
 
@@ -420,19 +420,19 @@ func TestSettingsWidgetMultiInstanceEditing(t *testing.T) {
 		Instances: []jira.InstanceConfig{
 			{
 				ID:       "inst-1",
-				Name:     "Avono",
+				Name:     "avono",
 				BaseURL:  "https://avono.atlassian.net",
-				Email:    "f@avono.de",
+				Email:    "frank.hess@avono.de",
 				APIToken: "tok-1",
 				JQLQuery: "assignee = currentUser()",
 			},
 			{
 				ID:       "inst-2",
-				Name:     "Sandbox",
-				BaseURL:  "https://example.atlassian.net",
-				Email:    "f@example.com",
+				Name:     "avono DC",
+				BaseURL:  "https://jira.avono.de",
+				Email:    "frank.hess@avono.de",
 				APIToken: "tok-2",
-				JQLQuery: "project = MOCK",
+				JQLQuery: "project = AVN",
 			},
 		},
 	}
@@ -778,7 +778,7 @@ func TestAppViewClickAndHoverDetails(t *testing.T) {
 	view.SetBounds(geometry.NewRect(0, 0, 780, 580))
 	view.Draw(ctx, canvas)
 
-	// Click instance tab 2 ("Sandbox DC") at x=160, y=60
+	// Click instance tab 2 ("avono DC") at x=160, y=60
 	view.handleClick(geometry.Pt(160, 60))
 	view.mu.Lock()
 	selectedInst := view.selectedInstIdx

@@ -107,17 +107,17 @@ func BenchmarkFormatBranchNameComplex(b *testing.B) {
 func BenchmarkConfigSaveLoad(b *testing.B) {
 	cfg := Config{
 		Instances: []InstanceConfig{
-			{ID: "inst-1", Name: "Avono", BaseURL: "https://avono.atlassian.net", Email: "f@avono.de", APIToken: "token1", JQLQuery: "assignee = currentUser()"},
-			{ID: "inst-2", Name: "Sandbox", BaseURL: "https://example.atlassian.net", Email: "f@example.com", APIToken: "token2", JQLQuery: "project = MOCK"},
-			{ID: "inst-3", Name: "Sandbox", BaseURL: "https://example.atlassian.net", Email: "f@example.com", APIToken: "token3", JQLQuery: "project = MOCK"},
+			{ID: "inst-1", Name: "avono cloud", BaseURL: "https://avono.atlassian.net", Email: "frank.hess@avono.de", APIToken: "token1", JQLQuery: "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC"},
+			{ID: "inst-2", Name: "avono DC", BaseURL: "https://jira.avono.de", Email: "frank.hess@avono.de", APIToken: "token2", JQLQuery: "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC"},
+			{ID: "inst-3", Name: "sandbox", BaseURL: "https://sandbox.atlassian.net", Email: "frank.hess@avono.de", APIToken: "token3", JQLQuery: "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC"},
 		},
 		ActiveInstID: "inst-1",
 		BaseURL:      "https://avono.atlassian.net",
-		Email:        "f@avono.de",
+		Email:        "frank.hess@avono.de",
 		APIToken:     "token1",
 		PollInterval: 300,
 		BranchPrefix: "feature/",
-		PinnedKeys:   []string{"AVN-1", "MOCK-2", "MOCK-3"},
+		PinnedKeys:   []string{"AVN-1", "AVN-2", "SBX-3"},
 		DemoMode:     false,
 		DebugMode:    true,
 	}

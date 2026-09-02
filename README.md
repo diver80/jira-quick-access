@@ -4,7 +4,10 @@ Jira tickets that live at the edge of your screen. A high-performance native des
 
 No dock clutter, no window to manage. Slide the pointer to the right edge and the deck fans out.
 
-**[Download for macOS (Universal App & DMG)](dist/osx/)** · **[Windows & Linux Binaries](dist/)**
+📥 **[Download for macOS (.dmg Installer)](dist/osx/Jira%20Quick%20Access-v1.0.0-macOS-Universal.dmg)** · **[macOS App Bundle & Assets](dist/osx/)**
+
+> [!NOTE]
+> **Platform Support**: Currently, **only the macOS (Darwin) version is actively tested and verified** (with native Cocoa edge docking, Retina multi-resolution icons, and embedded WebKit). Windows and Linux builds are experimental cross-compilations and not yet thoroughly tested.
 
 ---
 
@@ -24,7 +27,7 @@ No dock clutter, no window to manage. Slide the pointer to the right edge and th
 
 ![Jira Instances & Credentials Settings Overlay](docs/screenshots/settings.png)
 
-Manage credentials, multi-instance tabs (e.g. *Avono*, *Sandbox*, *Sandbox*), custom JQL queries, connection test verification, and `.env` import.
+Manage credentials, multi-instance tabs (e.g. *avono cloud*, *avono DC*), custom JQL queries, connection test verification, and `.env` import.
 
 ### 💾 Where Settings & Credentials Are Stored
 
@@ -88,24 +91,31 @@ go run .
 go test -v ./...
 ```
 
-### Build Release Packages:
-The bundled `build.sh` script automates cross-compilation across macOS, Windows, and Linux:
+### Build & Installation:
+The bundled `build.sh` script automates cross-compilation, icon packaging, and disk image installer creation:
 
 ```bash
-# Build all platforms
-./build.sh all
+# 🚀 1-Click Install to /Applications (macOS)
+./build.sh install
 
-# Platform-specific builds
-./build.sh osx    # macOS (ARM64 & x86_64 App Bundle + tar.gz)
-./build.sh win    # Windows (.exe & .zip)
-./build.sh lin    # Linux (ELF binary & tar.gz)
+# Build macOS Universal 2 .app bundle & .dmg installer
+./build.sh osx
+
+# Build all platforms (macOS DMG + App, Windows .exe + .zip, Linux)
+./build.sh all
 ```
 
 Generated artifacts are placed in `dist/`:
-- `dist/osx/Jira Quick Access.app`
-- `dist/osx/JiraQuickAccess-macOS-arm64.tar.gz`
+- `dist/osx/Jira Quick Access.app` (macOS Universal 2 App Bundle with Retina `AppIcon.icns`)
+- `dist/osx/Jira Quick Access-v1.0.0-macOS-Universal.dmg` (Drag-and-Drop Disk Image Installer)
 - `dist/win/jira-quick-access-windows-amd64.exe`
 - `dist/lin/jira-quick-access-linux-amd64`
+
+### 🍎 How to Install & Launch on macOS:
+1. **Automated (Fastest)**: Run `./build.sh install`. This copies the app into `/Applications/`, clears quarantine flags, and makes it available system-wide in Spotlight and Launchpad.
+2. **Standard macOS DMG**: Open the [Jira Quick Access DMG Installer](dist/osx/Jira%20Quick%20Access-v1.0.0-macOS-Universal.dmg) in Finder and drag the **Jira Quick Access** icon onto the **Applications** folder shortcut.
+3. **Launch**: Press `⌘ + Space`, type `Jira Quick Access`, and hit `Enter`.
+4. **Launch at Login (Optional)**: Open **macOS System Settings** -> **General** -> **Login Items** -> Click `+` and select `Jira Quick Access` from `/Applications`.
 
 ---
 

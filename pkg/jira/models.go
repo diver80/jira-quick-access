@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// InstanceConfig represents an individual Jira workspace instance (e.g. Avono, Sandbox, Sandbox).
+// InstanceConfig represents an individual Jira workspace instance (e.g. avono cloud, avono DC).
 type InstanceConfig struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
@@ -34,7 +34,7 @@ type Config struct {
 	PollInterval int              `json:"poll_interval"` // Sync frequency in seconds (default: 300 / 5 min)
 	BranchPrefix string           `json:"branch_prefix"` // Git branch prefix (e.g., "feature/")
 	PinnedKeys   []string         `json:"pinned_keys"`   // Pinned issue keys
-	DemoMode     bool             `json:"demo_mode"`     // Mock / demo workflow without live Jira
+	DemoMode     bool             `json:"demo_mode"`     // Mock / demo workflow without live Jira (default: false)
 	DebugMode    bool             `json:"debug_mode"`    // Verbose logging of API requests & auth headers
 }
 
@@ -53,7 +53,7 @@ func (c Config) MaskedAPIToken() string {
 // EnsureInstances ensures at least one valid instance exists from top-level or instances list.
 func (c *Config) EnsureInstances() {
 	if len(c.Instances) == 0 {
-		name := "Avono"
+		name := "avono"
 		if c.BaseURL != "" {
 			name = "Primary"
 		}
@@ -80,7 +80,7 @@ func DefaultConfig() Config {
 		Instances: []InstanceConfig{
 			{
 				ID:       "inst-1",
-				Name:     "Avono",
+				Name:     "avono cloud",
 				BaseURL:  "https://avono.atlassian.net",
 				Email:    "frank.hess@avono.de",
 				APIToken: "",
@@ -88,8 +88,8 @@ func DefaultConfig() Config {
 			},
 			{
 				ID:       "inst-2",
-				Name:     "Sandbox Server",
-				BaseURL:  "https://example.atlassian.net",
+				Name:     "avono DC",
+				BaseURL:  "https://jira.avono.de",
 				Email:    "frank.hess@avono.de",
 				APIToken: "",
 				JQLQuery: "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC",

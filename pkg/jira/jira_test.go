@@ -191,13 +191,13 @@ func TestIssueModelsAndSerialization(t *testing.T) {
 
 // Tier 1: Unit Tests for Config.EnsureInstances and DefaultConfig
 func TestConfigEnsureInstances(t *testing.T) {
-	// Case 1: Empty config defaults to Avono inst-1
+	// Case 1: Empty config defaults to avono inst-1
 	var emptyCfg Config
 	emptyCfg.EnsureInstances()
 	if len(emptyCfg.Instances) != 1 {
 		t.Fatalf("expected 1 instance, got %d", len(emptyCfg.Instances))
 	}
-	if emptyCfg.Instances[0].ID != "inst-1" || emptyCfg.Instances[0].Name != "Avono" {
+	if emptyCfg.Instances[0].ID != "inst-1" || emptyCfg.Instances[0].Name != "avono" {
 		t.Errorf("unexpected instance config: %+v", emptyCfg.Instances[0])
 	}
 	if emptyCfg.ActiveInstID != "inst-1" {
@@ -595,12 +595,12 @@ func TestMockHTTPVerifyConnectionScenarios(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"displayName":"Frank Hess","emailAddress":"frank@avono.de","name":"fhess"}`)
+		fmt.Fprintf(w, `{"displayName":"Frank Hess","emailAddress":"frank.hess@avono.de","name":"fhess"}`)
 	}))
 	defer tsSuccess.Close()
 
 	client := NewClient(DefaultConfig())
-	name, err := client.VerifyInstanceConnection(context.Background(), tsSuccess.URL, "frank@avono.de", "tok123")
+	name, err := client.VerifyInstanceConnection(context.Background(), tsSuccess.URL, "frank.hess@avono.de", "tok123")
 	if err != nil || name != "Frank Hess" {
 		t.Fatalf("expected 'Frank Hess', got %q, err=%v", name, err)
 	}
@@ -608,13 +608,13 @@ func TestMockHTTPVerifyConnectionScenarios(t *testing.T) {
 	// Scenario 2: 200 OK with missing displayName falls back to emailAddress
 	tsEmailOnly := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"displayName":"","emailAddress":"frank@avono.de","name":""}`)
+		fmt.Fprintf(w, `{"displayName":"","emailAddress":"frank.hess@avono.de","name":""}`)
 	}))
 	defer tsEmailOnly.Close()
 
-	name, err = client.VerifyInstanceConnection(context.Background(), tsEmailOnly.URL, "frank@avono.de", "tok123")
-	if err != nil || name != "frank@avono.de" {
-		t.Fatalf("expected 'frank@avono.de', got %q, err=%v", name, err)
+	name, err = client.VerifyInstanceConnection(context.Background(), tsEmailOnly.URL, "frank.hess@avono.de", "tok123")
+	if err != nil || name != "frank.hess@avono.de" {
+		t.Fatalf("expected 'frank.hess@avono.de', got %q, err=%v", name, err)
 	}
 
 	// Scenario 3: 401 Unauthorized
@@ -623,7 +623,7 @@ func TestMockHTTPVerifyConnectionScenarios(t *testing.T) {
 	}))
 	defer ts401.Close()
 
-	_, err = client.VerifyInstanceConnection(context.Background(), ts401.URL, "frank@avono.de", "bad-token")
+	_, err = client.VerifyInstanceConnection(context.Background(), ts401.URL, "frank.hess@avono.de", "bad-token")
 	if err == nil || !strings.Contains(err.Error(), "401") {
 		t.Fatalf("expected 401 error, got %v", err)
 	}
@@ -634,7 +634,7 @@ func TestMockHTTPVerifyConnectionScenarios(t *testing.T) {
 	}))
 	defer ts404.Close()
 
-	_, err = client.VerifyInstanceConnection(context.Background(), ts404.URL, "frank@avono.de", "token")
+	_, err = client.VerifyInstanceConnection(context.Background(), ts404.URL, "frank.hess@avono.de", "token")
 	if err == nil || !strings.Contains(err.Error(), "404") {
 		t.Fatalf("expected 404 error, got %v", err)
 	}
@@ -645,17 +645,17 @@ func TestMockHTTPVerifyConnectionScenarios(t *testing.T) {
 	}))
 	defer ts500.Close()
 
-	_, err = client.VerifyInstanceConnection(context.Background(), ts500.URL, "frank@avono.de", "token")
+	_, err = client.VerifyInstanceConnection(context.Background(), ts500.URL, "frank.hess@avono.de", "token")
 	if err == nil || !strings.Contains(err.Error(), "500") {
 		t.Fatalf("expected 500 error, got %v", err)
 	}
 
 	// Scenario 6: Missing BaseURL or APIToken
-	_, err = client.VerifyInstanceConnection(context.Background(), "", "frank@avono.de", "tok")
+	_, err = client.VerifyInstanceConnection(context.Background(), "", "frank.hess@avono.de", "tok")
 	if err == nil {
 		t.Errorf("expected error for empty BaseURL")
 	}
-	_, err = client.VerifyInstanceConnection(context.Background(), "https://jira.test", "frank@avono.de", "")
+	_, err = client.VerifyInstanceConnection(context.Background(), "https://jira.test", "frank.hess@avono.de", "")
 	if err == nil {
 		t.Errorf("expected error for empty Token")
 	}
@@ -663,7 +663,7 @@ func TestMockHTTPVerifyConnectionScenarios(t *testing.T) {
 	// Scenario 7: Context cancellation
 	ctxCancel, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err = client.VerifyInstanceConnection(ctxCancel, tsSuccess.URL, "frank@avono.de", "tok123")
+	_, err = client.VerifyInstanceConnection(ctxCancel, tsSuccess.URL, "frank.hess@avono.de", "tok123")
 	if err == nil {
 		t.Errorf("expected error on cancelled context")
 	}

@@ -722,7 +722,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			count := len(instIssues)
 
 			// Distinct colors per instance
-			beaconColor := widget.RGBA8(56, 189, 248, 255) // Cyan (Avono)
+			beaconColor := widget.RGBA8(56, 189, 248, 255) // Cyan (avono)
 			beaconGlow := widget.RGBA8(56, 189, 248, 55)
 			inProgColor := widget.RGBA8(56, 189, 248, 255) // Light Cyan
 			todoColor := widget.RGBA8(14, 116, 144, 255)   // Dark Blue / Cyan
@@ -731,7 +731,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			badgeBorder := widget.RGBA8(56, 189, 248, 140)
 
 			if idx == 1 {
-				beaconColor = widget.RGBA8(168, 85, 247, 255) // Purple (Sandbox)
+				beaconColor = widget.RGBA8(168, 85, 247, 255) // Purple (Instance 2)
 				beaconGlow = widget.RGBA8(168, 85, 247, 55)
 				inProgColor = widget.RGBA8(192, 132, 252, 255) // Light Purple
 				todoColor = widget.RGBA8(107, 33, 168, 255)    // Darker Violet
@@ -739,7 +739,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				badgeBg = widget.RGBA8(38, 26, 56, 240)
 				badgeBorder = widget.RGBA8(168, 85, 247, 140)
 			} else if idx == 2 {
-				beaconColor = widget.RGBA8(234, 179, 8, 255) // Amber (Sandbox)
+				beaconColor = widget.RGBA8(234, 179, 8, 255) // Amber (Instance 3)
 				beaconGlow = widget.RGBA8(234, 179, 8, 55)
 				inProgColor = widget.RGBA8(250, 204, 21, 255) // Light Yellow/Amber
 				todoColor = widget.RGBA8(161, 98, 7, 255)     // Darker Amber
@@ -1266,13 +1266,17 @@ func (v *AppView) drawSettingsOverlay(ctx widget.Context, canvas widget.Canvas, 
 	// 4. Bottom Action Row
 	btnY := r.Min.Y + r.Height() - 44
 
-	demoModeTxt := "Mode: Live Jira"
+	demoModeTxt := "● Live Jira"
+	demoBg := widget.RGBA8(16, 185, 129, 200)
+	demoFg := widget.RGBA8(255, 255, 255, 255)
 	if s.demoMode {
-		demoModeTxt = "Mode: Demo Mock Data"
+		demoModeTxt = "⚠ Demo Mock Mode"
+		demoBg = widget.RGBA8(217, 119, 6, 220)
+		demoFg = widget.RGBA8(255, 255, 255, 255)
 	}
 	demoRect := geometry.NewRect(r.Min.X+20, btnY, 130, 28)
-	canvas.DrawRoundRect(demoRect, widget.RGBA8(34, 42, 58, 255), 6)
-	canvas.DrawText(demoModeTxt, demoRect, 10, widget.RGBA8(240, 245, 255, 255), false, widget.TextAlignCenter)
+	canvas.DrawRoundRect(demoRect, demoBg, 6)
+	canvas.DrawText(demoModeTxt, demoRect, 10, demoFg, false, widget.TextAlignCenter)
 
 	debugTxt := "Debug: OFF"
 	debugBg := widget.RGBA8(34, 42, 58, 255)
@@ -2023,6 +2027,15 @@ func (v *AppView) testConn() {
 func (v *AppView) saveSettings() {
 	v.mu.Lock()
 	v.saveCurrentInstanceFieldsLocked()
+
+	// If credentials are configured on any instance, automatically switch to Live Jira mode
+	for _, inst := range v.config.Instances {
+		if inst.BaseURL != "" && inst.APIToken != "" {
+			v.demoMode = false
+			break
+		}
+	}
+
 	v.config.DemoMode = v.demoMode
 	v.config.DebugMode = v.debugMode
 	if len(v.config.Instances) > 0 {

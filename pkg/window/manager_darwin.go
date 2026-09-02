@@ -227,6 +227,9 @@ static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
                     [g_ticketWebView setWantsLayer:YES];
                     [g_ticketWebView.layer setCornerRadius:14.0];
                     [g_ticketWebView.layer setMasksToBounds:YES];
+                    [g_ticketWebView.layer setBorderWidth:1.5];
+                    [g_ticketWebView.layer setBorderColor:[[NSColor colorWithCalibratedWhite:1.0 alpha:0.40] CGColor]];
+                    [g_ticketWebView.layer setBackgroundColor:[[NSColor colorWithCalibratedRed:0.07 green:0.09 blue:0.15 alpha:0.98] CGColor]];
                     [contentView addSubview:g_ticketWebView];
 
                     // Floating sleek Close button (✕)
@@ -238,6 +241,8 @@ static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
                     [g_closeButton setAction:@selector(onCloseHUDClicked:)];
                     [g_closeButton setWantsLayer:YES];
                     [g_closeButton.layer setCornerRadius:14.0];
+                    [g_closeButton.layer setBorderWidth:1.0];
+                    [g_closeButton.layer setBorderColor:[[NSColor colorWithCalibratedWhite:1.0 alpha:0.35] CGColor]];
                     [contentView addSubview:g_closeButton positioned:NSWindowAbove relativeTo:g_ticketWebView];
                 }
             }
@@ -245,6 +250,10 @@ static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
                 CGFloat cardW = (CGFloat)(w - 118);
                 CGFloat cardH = (CGFloat)(h - 16);
                 [g_ticketWebView setFrame:NSMakeRect(8, 8, cardW, cardH)];
+                [g_ticketWebView.layer setCornerRadius:14.0];
+                [g_ticketWebView.layer setMasksToBounds:YES];
+                [g_ticketWebView.layer setBorderWidth:1.5];
+                [g_ticketWebView.layer setBorderColor:[[NSColor colorWithCalibratedWhite:1.0 alpha:0.40] CGColor]];
                 [g_ticketWebView setHidden:NO];
                 [g_ticketWebView evaluateJavaScript:kHideJiraHeaderScript completionHandler:nil];
             }

@@ -150,6 +150,10 @@ func (s *SettingsWidget) currentConfig() jira.Config {
 
 func (s *SettingsWidget) saveAndApply() {
 	cfg := s.currentConfig()
+	if cfg.BaseURL != "" && cfg.APIToken != "" {
+		s.demoMode = false
+		cfg.DemoMode = false
+	}
 	_ = jira.SaveConfig(cfg)
 	if s.onSave != nil {
 		s.onSave(cfg)
