@@ -913,13 +913,20 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			canvas.DrawCircle(beaconCenter, 6.0, beaconGlow)
 			canvas.DrawCircle(beaconCenter, 3.5, beaconColor)
 
-			// Proportional Gauge Indicator Inset at X+5.5
+			// Edge marker & ticket badge positioning (adapts to Left / Right dock side)
+			markerX := b.Min.X + w - 5.5
+			badgeX := b.Min.X + 3.5
+			if s.dockSide == window.DockSideLeft {
+				markerX = b.Min.X + 5.5
+				badgeX = b.Min.X + 9.5
+			}
+
 			lineTopY := secY + 3
 			lineBottomY := secY + instSectionH - 5
 			lineTotalH := lineBottomY - lineTopY
 
 			// 1. Background full track
-			canvas.DrawLine(geometry.Pt(b.Min.X+5.5, lineTopY), geometry.Pt(b.Min.X+5.5, lineBottomY), trackColor, 2.0)
+			canvas.DrawLine(geometry.Pt(markerX, lineTopY), geometry.Pt(markerX, lineBottomY), trackColor, 2.0)
 
 			// 2. Scale line height proportionally to maxCount
 			ratio := float32(count) / float32(maxCount)
@@ -948,19 +955,19 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				// In Progress segment
 				if inProgCount > 0 {
 					segH := fillH * (float32(inProgCount) / float32(count))
-					canvas.DrawLine(geometry.Pt(b.Min.X+5.5, curY), geometry.Pt(b.Min.X+5.5, curY+segH), inProgColor, 2.0)
+					canvas.DrawLine(geometry.Pt(markerX, curY), geometry.Pt(markerX, curY+segH), inProgColor, 2.0)
 					curY += segH
 				}
 				// To Do segment
 				if todoCount > 0 {
 					segH := fillH * (float32(todoCount) / float32(count))
-					canvas.DrawLine(geometry.Pt(b.Min.X+5.5, curY), geometry.Pt(b.Min.X+5.5, curY+segH), todoColor, 2.0)
+					canvas.DrawLine(geometry.Pt(markerX, curY), geometry.Pt(markerX, curY+segH), todoColor, 2.0)
 					curY += segH
 				}
 				// Done segment
 				if doneCount > 0 {
 					segH := fillH * (float32(doneCount) / float32(count))
-					canvas.DrawLine(geometry.Pt(b.Min.X+5.5, curY), geometry.Pt(b.Min.X+5.5, curY+segH), widget.RGBA8(34, 197, 94, 255), 2.0)
+					canvas.DrawLine(geometry.Pt(markerX, curY), geometry.Pt(markerX, curY+segH), widget.RGBA8(34, 197, 94, 255), 2.0)
 				}
 			}
 
@@ -968,7 +975,6 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			countStr := fmt.Sprintf("%d", count)
 			badgeW := float32(19)
 			badgeH := float32(18)
-			badgeX := b.Min.X + 9.5
 			countBox := geometry.NewRect(badgeX, secY+18, badgeW, badgeH)
 			canvas.DrawRoundRect(countBox, badgeBg, 5)
 			canvas.StrokeRoundRect(countBox, badgeBorder, 5, 1.0)
@@ -1099,10 +1105,10 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				if isHovered {
 					// Glowing animated Dock-style hover lift
 					canvas.StrokeRoundRect(tabRect, widget.RGBA8(255, 255, 255, 240), 8, 1.5)
-					// Vibrant indicator pill on edge facing inward
-					pillX := tabX + 2
+					// Vibrant indicator pill on edge
+					pillX := tabX + tabW - 5
 					if s.dockSide == window.DockSideLeft {
-						pillX = tabX + tabW - 5
+						pillX = tabX + 2
 					}
 					canvas.DrawRoundRect(geometry.NewRect(pillX, tabY+8, 3, tabHeight-16), tabTheme.Foreground, 1.5)
 				} else {
@@ -1225,6 +1231,11 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		canvas.DrawRoundRect(tabRect, tabTheme.Background, 8)
 		if isActive {
 			canvas.StrokeRoundRect(tabRect, widget.RGBA8(255, 255, 255, 240), 8, 1.5)
+			pillX := tabX + tabWidth - 5
+			if s.dockSide == window.DockSideLeft {
+				pillX = tabX + 2
+			}
+			canvas.DrawRoundRect(geometry.NewRect(pillX, tabY+8, 3, tabHeight-16), tabTheme.Foreground, 1.5)
 		} else {
 			canvas.StrokeRoundRect(tabRect, tabTheme.Border, 8, 1.0)
 		}

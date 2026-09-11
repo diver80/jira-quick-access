@@ -1029,4 +1029,46 @@ func TestAppViewGlobalShortcutsAndNavigation(t *testing.T) {
 	}
 }
 
+// TestAppViewEdgeMarkerDockSides tests rendering of the edge marker and badge on left vs right dock sides.
+func TestAppViewEdgeMarkerDockSides(t *testing.T) {
+	cfg := jira.DefaultConfig()
+	cfg.DemoMode = true
+	client := jira.NewClient(cfg)
+	view := NewAppView(cfg, client, nil)
+	defer view.Close()
+
+	ctx := widget.NewContext()
+	canvas := &mockCanvas{}
+
+	// 1. StateRest with DockSideRight
+	view.SetDockSide(window.DockSideRight)
+	view.SetState(window.StateRest)
+	view.SetBounds(geometry.NewRect(0, 0, 32, 224))
+	view.Draw(ctx, canvas)
+
+	// 2. StateRest with DockSideLeft
+	view.SetDockSide(window.DockSideLeft)
+	view.Draw(ctx, canvas)
+
+	// 3. StateFan with DockSideRight and DockSideLeft
+	view.SetDockSide(window.DockSideRight)
+	view.SetState(window.StateFan)
+	view.SetBounds(geometry.NewRect(0, 0, 120, 500))
+	view.hoveredTabIdx = 0
+	view.Draw(ctx, canvas)
+
+	view.SetDockSide(window.DockSideLeft)
+	view.Draw(ctx, canvas)
+
+	// 4. StateExpanded with DockSideRight and DockSideLeft
+	view.SetDockSide(window.DockSideRight)
+	view.SetState(window.StateExpanded)
+	view.SetBounds(geometry.NewRect(0, 0, 780, 580))
+	view.activeIdx = 0
+	view.Draw(ctx, canvas)
+
+	view.SetDockSide(window.DockSideLeft)
+	view.Draw(ctx, canvas)
+}
+
 
