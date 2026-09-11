@@ -764,13 +764,22 @@ func TestAppViewClickAndHoverDetails(t *testing.T) {
 	view.SetBounds(geometry.NewRect(0, 0, 32, 224))
 	view.Draw(ctx, canvas)
 
-	// Hover settings dot at bottom of rest capsule (y > 224-28 = 196)
+	// Hover settings dot at bottom of rest capsule sets hoveredSettings without accidentally opening
 	view.handleHover(geometry.Pt(16, 205))
+	view.mu.Lock()
+	hovSettings := view.hoveredSettings
+	view.mu.Unlock()
+	if !hovSettings {
+		t.Errorf("expected hovering settings dot in Rest to set hoveredSettings")
+	}
+
+	// Click settings dot at bottom of rest capsule to open Settings
+	view.handleClick(geometry.Pt(16, 205))
 	view.mu.Lock()
 	showSettings := view.showSettings
 	view.mu.Unlock()
 	if !showSettings {
-		t.Errorf("expected hovering settings dot in Rest to open Settings")
+		t.Errorf("expected clicking settings dot in Rest to open Settings")
 	}
 
 	// 2. Click in Expanded State Settings Modal
@@ -860,4 +869,164 @@ func TestAppViewTokenSanitization(t *testing.T) {
 		t.Errorf("expected normal token unchanged, got %q", s)
 	}
 }
+
+// Tier 1 & 3: Docking, Profile Colors, Always On Top, and Auto-Hide Controls
+func TestAppViewDockingAndProfileColorControls(t *testing.T) {
+	cfg := jira.DefaultConfig()
+	cfg.DemoMode = true
+	client := jira.NewClient(cfg)
+	view := NewAppView(cfg, client, nil)
+	defer view.Close()
+
+	ctx := &mockContext{}
+	canvas := &mockCanvas{}
+
+	// 1. SetDockSide and SetMonitor directly
+	view.SetDockSide(window.DockSideLeft)
+	if view.dockSide != window.DockSideLeft {
+		t.Errorf("expected DockSideLeft, got %v", view.dockSide)
+	}
+	view.SetDockSide(window.DockSideRight)
+	if view.dockSide != window.DockSideRight {
+		t.Errorf("expected DockSideRight, got %v", view.dockSide)
+	}
+	view.SetMonitor(0)
+	if view.selectedMonitor != 0 {
+		t.Errorf("expected monitor 0, got %d", view.selectedMonitor)
+	}
+
+	// 2. SetAlwaysOnTop and SetAutoHide
+	view.SetAlwaysOnTop(true)
+	if !view.alwaysOnTop {
+		t.Errorf("expected alwaysOnTop true")
+	}
+	view.SetAlwaysOnTop(false)
+	if view.alwaysOnTop {
+		t.Errorf("expected alwaysOnTop false")
+	}
+	view.SetAutoHide(true)
+	if !view.autoHide {
+		t.Errorf("expected autoHide true")
+	}
+	view.setTucked(true)
+	if !view.isTucked {
+		t.Errorf("expected isTucked true")
+	}
+	view.setTucked(false)
+	if view.isTucked {
+		t.Errorf("expected isTucked false")
+	}
+	view.SetAutoHide(false)
+
+	// 3. StartDrag
+	view.StartDrag()
+
+	// 4. Open Settings and test interactive clicks
+	view.OpenSettings()
+	view.SetBounds(geometry.NewRect(0, 0, 780, 580))
+	view.Draw(ctx, canvas)
+
+	getRMinX := func() float32 {
+		if view.dockSide == window.DockSideLeft {
+			return 118
+		}
+		return 8
+	}
+
+	// Click Left Edge button in Settings
+	dockSecY := float32(78 + 12 + 5*45 + 2 + 40)
+	row1Y := dockSecY + 24
+	view.handleClick(geometry.Pt(getRMinX()+40, row1Y+10))
+	if view.dockSide != window.DockSideLeft {
+		t.Errorf("expected Left Edge click to set DockSideLeft, got %v", view.dockSide)
+	}
+
+	// Click Right Edge button in Settings
+	view.handleClick(geometry.Pt(getRMinX()+140, row1Y+10))
+	if view.dockSide != window.DockSideRight {
+		t.Errorf("expected Right Edge click to set DockSideRight, got %v", view.dockSide)
+	}
+
+	// Click Always On Top toggle
+	row2Y := dockSecY + 54
+	prevAOT := view.alwaysOnTop
+	view.handleClick(geometry.Pt(getRMinX()+40, row2Y+10))
+	if view.alwaysOnTop == prevAOT {
+		t.Errorf("expected Always On Top toggle click to flip state")
+	}
+
+	// Click Auto-Hide toggle
+	prevAH := view.autoHide
+	view.handleClick(geometry.Pt(getRMinX()+180, row2Y+10))
+	if view.autoHide == prevAH {
+		t.Errorf("expected Auto-Hide toggle click to flip state")
+	}
+
+	// Click 2nd Profile Color chip (Purple: #a855f7 at rMinX+30+28=58, y=colorRowY+24)
+	colorRowY := float32(78 + 12 + 5*45 + 2)
+	view.handleClick(geometry.Pt(getRMinX()+30+28, colorRowY+24))
+	view.mu.Lock()
+	col := view.colorVal
+	view.mu.Unlock()
+	if !strings.EqualFold(col, "#a855f7") {
+		t.Errorf("expected colorVal #a855f7, got %q", col)
+	}
+}
+
+// Tier 1 & 2: Global Shortcuts and Arrow Key Ticket Navigation
+func TestAppViewGlobalShortcutsAndNavigation(t *testing.T) {
+	cfg := jira.DefaultConfig()
+	cfg.DemoMode = true
+	client := jira.NewClient(cfg)
+	view := NewAppView(cfg, client, nil)
+	defer view.Close()
+
+	view.SetState(window.StateFan)
+	view.SetBounds(geometry.NewRect(0, 0, 120, 500))
+
+	// 1. Cmd+R: Refresh
+	refreshEv := event.NewKeyEvent(event.KeyPress, event.KeyR, 'r', event.ModSuper)
+	if !view.handleKey(refreshEv) {
+		t.Errorf("expected Cmd+R to be handled")
+	}
+
+	// 2. Cmd+K: Focus search
+	searchEv := event.NewKeyEvent(event.KeyPress, event.KeyK, 'k', event.ModSuper)
+	if !view.handleKey(searchEv) {
+		t.Errorf("expected Cmd+K to be handled")
+	}
+	if !view.searchActive {
+		t.Errorf("expected searchActive true after Cmd+K")
+	}
+
+	// 3. Arrow Down and Up navigation
+	view.SetState(window.StateExpanded)
+	downEv := event.NewKeyEvent(event.KeyPress, event.KeyDown, 0, event.ModNone)
+	if !view.handleKey(downEv) {
+		t.Errorf("expected Arrow Down to be handled")
+	}
+	upEv := event.NewKeyEvent(event.KeyPress, event.KeyUp, 0, event.ModNone)
+	if !view.handleKey(upEv) {
+		t.Errorf("expected Arrow Up to be handled")
+	}
+
+	// 4. Cmd+C: Copy issue key
+	copyEv := event.NewKeyEvent(event.KeyPress, event.KeyC, 'c', event.ModSuper)
+	if !view.handleKey(copyEv) {
+		t.Errorf("expected Cmd+C to be handled")
+	}
+
+	// 5. Cmd+Shift+C: Copy branch name
+	branchEv := event.NewKeyEvent(event.KeyPress, event.KeyC, 'c', event.ModSuper|event.ModShift)
+	if !view.handleKey(branchEv) {
+		t.Errorf("expected Cmd+Shift+C to be handled")
+	}
+
+	// 6. Cmd+O: Open ticket in browser
+	openEv := event.NewKeyEvent(event.KeyPress, event.KeyO, 'o', event.ModSuper)
+	if !view.handleKey(openEv) {
+		t.Errorf("expected Cmd+O to be handled")
+	}
+}
+
 

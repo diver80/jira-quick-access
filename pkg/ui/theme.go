@@ -157,3 +157,71 @@ func GetStatusColors(categoryKey, statusName string) (fg, bg, glow widget.Color)
 		return widget.RGBA8(226, 232, 240, 255), widget.RGBA8(51, 65, 85, 140), widget.RGBA8(148, 163, 184, 80)
 	}
 }
+
+// ProfileColorPreset provides a curated palette for custom Jira profiles
+type ProfileColorPreset struct {
+	Name  string
+	Hex   string
+	Color widget.Color
+	Glow  widget.Color
+}
+
+var ProfilePresets = []ProfileColorPreset{
+	{Name: "Cyan", Hex: "#38bdf8", Color: widget.RGBA8(56, 189, 248, 255), Glow: widget.RGBA8(56, 189, 248, 65)},
+	{Name: "Purple", Hex: "#a855f7", Color: widget.RGBA8(168, 85, 247, 255), Glow: widget.RGBA8(168, 85, 247, 65)},
+	{Name: "Amber", Hex: "#eab308", Color: widget.RGBA8(234, 179, 8, 255), Glow: widget.RGBA8(234, 179, 8, 65)},
+	{Name: "Emerald", Hex: "#22c55e", Color: widget.RGBA8(34, 197, 94, 255), Glow: widget.RGBA8(34, 197, 94, 65)},
+	{Name: "Pink", Hex: "#ec4899", Color: widget.RGBA8(236, 72, 153, 255), Glow: widget.RGBA8(236, 72, 153, 65)},
+	{Name: "Orange", Hex: "#f97316", Color: widget.RGBA8(249, 115, 22, 255), Glow: widget.RGBA8(249, 115, 22, 65)},
+	{Name: "Blue", Hex: "#3b82f6", Color: widget.RGBA8(59, 130, 246, 255), Glow: widget.RGBA8(59, 130, 246, 65)},
+	{Name: "Rose", Hex: "#f43f5e", Color: widget.RGBA8(244, 63, 94, 255), Glow: widget.RGBA8(244, 63, 94, 65)},
+}
+
+// ParseHexColor parses a CSS hex color string (e.g., #38bdf8) into a widget.Color
+func ParseHexColor(hexStr string, fallback widget.Color) widget.Color {
+	hex := strings.TrimPrefix(strings.TrimSpace(hexStr), "#")
+	if len(hex) == 6 {
+		var r, g, b uint8
+		for i := 0; i < 3; i++ {
+			byteVal := byte(0)
+			for j := 0; j < 2; j++ {
+				c := hex[i*2+j]
+				byteVal <<= 4
+				if c >= '0' && c <= '9' {
+					byteVal += c - '0'
+				} else if c >= 'a' && c <= 'f' {
+					byteVal += c - 'a' + 10
+				} else if c >= 'A' && c <= 'F' {
+					byteVal += c - 'A' + 10
+				}
+			}
+			if i == 0 {
+				r = byteVal
+			} else if i == 1 {
+				g = byteVal
+			} else {
+				b = byteVal
+			}
+		}
+		return widget.RGBA8(r, g, b, 255)
+	}
+	return fallback
+}
+
+// GetInstanceColors calculates full theme palette for an instance (using its custom profile color if set)
+func GetInstanceColors(colorHex string, idx int) (core widget.Color, glow widget.Color, inProg widget.Color, todo widget.Color, track widget.Color, badgeBg widget.Color, badgeBorder widget.Color) {
+	defaultPreset := ProfilePresets[idx%len(ProfilePresets)]
+	core = defaultPreset.Color
+	if colorHex != "" {
+		core = ParseHexColor(colorHex, defaultPreset.Color)
+	}
+
+	glow = widget.RGBA(core.R, core.G, core.B, 0.25)
+	inProg = core
+	todo = widget.RGBA(core.R*0.6, core.G*0.6, core.B*0.6, 1.0)
+	track = widget.RGBA(core.R, core.G, core.B, 0.15)
+	badgeBg = widget.RGBA(core.R*0.12+0.05, core.G*0.12+0.05, core.B*0.12+0.08, 0.92)
+	badgeBorder = widget.RGBA(core.R, core.G, core.B, 0.55)
+	return
+}
+

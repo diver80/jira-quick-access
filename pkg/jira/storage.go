@@ -2,6 +2,7 @@ package jira
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -101,6 +102,19 @@ func LoadConfig() Config {
 			}
 			cfg.DemoMode = saved.DemoMode
 			cfg.DebugMode = saved.DebugMode
+			cfg.DockSide = saved.DockSide
+			cfg.MonitorIndex = saved.MonitorIndex
+			if saved.PosYRatio > 0 && saved.PosYRatio <= 1.0 {
+				cfg.PosYRatio = saved.PosYRatio
+			} else {
+				cfg.PosYRatio = 0.5
+			}
+			if bytes.Contains(data, []byte("\"always_on_top\"")) {
+				cfg.AlwaysOnTop = saved.AlwaysOnTop
+			} else {
+				cfg.AlwaysOnTop = true
+			}
+			cfg.AutoHide = saved.AutoHide
 		}
 	} else {
 		// First launch: No config.json exists on disk yet.

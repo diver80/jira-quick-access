@@ -9,12 +9,22 @@ package window
 #include <WebKit/WebKit.h>
 #include <QuartzCore/QuartzCore.h>
 #include <dispatch/dispatch.h>
+#include <stdlib.h>
+#include <string.h>
 
 extern void goCollapseCallback(void);
+extern void goDockChangedCallback(int side, int screenIndex, double yRatio);
 
 static NSWindow *g_appWindow = nil;
 static WKWebView *g_ticketWebView = nil;
 static NSButton *g_closeButton = nil;
+static int g_dockSide = 0;          // 0: Right, 1: Left
+static int g_screenIndex = 0;       // Monitor index (0..N-1)
+static double g_dockYRatio = 0.5;   // 0.0 - 1.0 (0.5 = centered)
+static int g_isDragging = 0;
+static int g_alwaysOnTop = 1;       // 1: Always on Top (NSStatusWindowLevel), 0: Normal
+static int g_autoHide = 0;          // 1: Auto-Hide like macOS Dock, 0: Disabled
+static int g_isTucked = 0;          // 1: Window is tucked into screen edge
 
 static void SetupDarwinEditMenu(void) {
     if ([NSApp mainMenu]) {
@@ -113,8 +123,13 @@ static void ApplyDarwinWindowStyles(NSWindow *window) {
         NSWindowCollectionBehaviorIgnoresCycle |
         NSWindowCollectionBehaviorFullScreenAuxiliary;
     [window setCollectionBehavior:behavior];
+    [window setHidesOnDeactivate:NO];
 
-    [window setLevel:NSFloatingWindowLevel];
+    if (g_alwaysOnTop) {
+        [window setLevel:NSStatusWindowLevel];
+    } else {
+        [window setLevel:NSNormalWindowLevel];
+    }
 
     NSView *contentView = [window contentView];
     if (contentView) {
@@ -140,7 +155,39 @@ static void ApplyDarwinWindowStyles(NSWindow *window) {
     }
 }
 
-static void DarwinDockToRightEdge(int width, int height, int state) {
+static int DarwinGetScreensCount(void) {
+    return (int)[[NSScreen screens] count];
+}
+
+static void DarwinGetScreenInfo(int idx, char *nameOut, int maxLen, int *isMainOut, int *xOut, int *yOut, int *wOut, int *hOut) {
+    NSArray *screens = [NSScreen screens];
+    if (idx < 0 || idx >= [screens count]) return;
+    NSScreen *s = [screens objectAtIndex:idx];
+    NSString *name = nil;
+    if (@available(macOS 10.15, *)) {
+        name = [s localizedName];
+    }
+    if (!name || [name length] == 0) {
+        if (s == [NSScreen mainScreen]) {
+            name = @"Main Display";
+        } else {
+            name = [NSString stringWithFormat:@"Display %d", idx + 1];
+        }
+    }
+    const char *utf8 = [name UTF8String];
+    if (utf8 && nameOut && maxLen > 0) {
+        strncpy(nameOut, utf8, maxLen - 1);
+        nameOut[maxLen - 1] = '\0';
+    }
+    if (isMainOut) *isMainOut = (s == [NSScreen mainScreen]) ? 1 : 0;
+    NSRect f = [s frame];
+    if (xOut) *xOut = (int)f.origin.x;
+    if (yOut) *yOut = (int)f.origin.y;
+    if (wOut) *wOut = (int)f.size.width;
+    if (hOut) *hOut = (int)f.size.height;
+}
+
+static void DarwinDock(int width, int height, int animate) {
     dispatch_async(dispatch_get_main_queue(), ^{
         SetupDarwinEditMenu();
 
@@ -155,12 +202,16 @@ static void DarwinDockToRightEdge(int width, int height, int state) {
 
         ApplyDarwinWindowStyles(g_appWindow);
 
-        NSScreen *screen = [g_appWindow screen];
-        if (!screen) {
-            screen = [NSScreen mainScreen];
+        NSArray *screens = [NSScreen screens];
+        NSScreen *screen = nil;
+        if (g_screenIndex >= 0 && g_screenIndex < [screens count]) {
+            screen = [screens objectAtIndex:g_screenIndex];
         }
-        if (!screen && [[NSScreen screens] count] > 0) {
-            screen = [[NSScreen screens] objectAtIndex:0];
+        if (!screen) {
+            screen = [g_appWindow screen] ?: [NSScreen mainScreen];
+        }
+        if (!screen && [screens count] > 0) {
+            screen = [screens objectAtIndex:0];
         }
 
         NSRect screenFrame = NSMakeRect(0, 0, 1440, 900);
@@ -171,12 +222,190 @@ static void DarwinDockToRightEdge(int width, int height, int state) {
             }
         }
 
-        CGFloat x = screenFrame.origin.x + screenFrame.size.width - (CGFloat)width;
-        CGFloat y = screenFrame.origin.y + (screenFrame.size.height - (CGFloat)height) / 2.0;
+        CGFloat x = 0;
+        if (g_dockSide == 1) {
+            // Docked to LEFT edge
+            if (g_autoHide && g_isTucked && width <= 40) {
+                x = screenFrame.origin.x - (CGFloat)width + 6.0;
+            } else {
+                x = screenFrame.origin.x;
+            }
+        } else {
+            // Docked to RIGHT edge
+            if (g_autoHide && g_isTucked && width <= 40) {
+                x = screenFrame.origin.x + screenFrame.size.width - 6.0;
+            } else {
+                x = screenFrame.origin.x + screenFrame.size.width - (CGFloat)width;
+            }
+        }
+
+        CGFloat availH = screenFrame.size.height - (CGFloat)height;
+        if (availH < 0) availH = 0;
+        CGFloat yRatio = (CGFloat)g_dockYRatio;
+        if (yRatio < 0.0) yRatio = 0.0;
+        if (yRatio > 1.0) yRatio = 1.0;
+        CGFloat y = screenFrame.origin.y + availH * yRatio;
 
         NSRect frame = NSMakeRect(x, y, (CGFloat)width, (CGFloat)height);
-        [g_appWindow setFrame:frame display:YES animate:NO];
-        [g_appWindow makeKeyAndOrderFront:nil];
+        if (animate) {
+            [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+                [context setDuration:0.2];
+                [[g_appWindow animator] setFrame:frame display:YES];
+            }];
+        } else {
+            [g_appWindow setFrame:frame display:YES animate:NO];
+        }
+
+        if (g_alwaysOnTop) {
+            [g_appWindow setLevel:NSStatusWindowLevel];
+            [g_appWindow setHidesOnDeactivate:NO];
+            [g_appWindow orderFrontRegardless];
+        } else {
+            [g_appWindow setLevel:NSNormalWindowLevel];
+            [g_appWindow makeKeyAndOrderFront:nil];
+        }
+    });
+}
+
+static void DarwinSetDockPosition(int side, int screenIndex, double yRatio, int width, int height) {
+    g_dockSide = (side == 1) ? 1 : 0;
+    if (screenIndex >= 0) g_screenIndex = screenIndex;
+    if (yRatio >= 0.0 && yRatio <= 1.0) g_dockYRatio = yRatio;
+    DarwinDock(width, height, 0);
+}
+
+static void DarwinSetAlwaysOnTop(int alwaysOnTop) {
+    g_alwaysOnTop = alwaysOnTop ? 1 : 0;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!g_appWindow) return;
+        if (g_alwaysOnTop) {
+            [g_appWindow setLevel:NSStatusWindowLevel];
+            [g_appWindow setHidesOnDeactivate:NO];
+            [g_appWindow orderFrontRegardless];
+        } else {
+            [g_appWindow setLevel:NSNormalWindowLevel];
+        }
+    });
+}
+
+static void DarwinSetAutoHide(int autoHide) {
+    g_autoHide = autoHide ? 1 : 0;
+    if (!g_autoHide && g_isTucked) {
+        g_isTucked = 0;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (g_appWindow) {
+                DarwinDock((int)[g_appWindow frame].size.width, (int)[g_appWindow frame].size.height, 1);
+            }
+        });
+    }
+}
+
+static void DarwinSetTucked(int tucked, int width, int height) {
+    int shouldTuck = tucked ? 1 : 0;
+    if (g_isTucked == shouldTuck) return;
+    g_isTucked = shouldTuck;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        DarwinDock(width, height, 1);
+    });
+}
+
+static int DarwinGetAlwaysOnTop(void) {
+    return g_alwaysOnTop;
+}
+
+static int DarwinGetAutoHide(void) {
+    return g_autoHide;
+}
+
+static void DarwinStartWindowDrag(int width, int height) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!g_appWindow) return;
+        if (g_isDragging) return;
+        g_isDragging = 1;
+
+        NSPoint startMouse = [NSEvent mouseLocation];
+        NSRect startFrame = [g_appWindow frame];
+
+        while (1) {
+            NSEvent *event = [NSApp nextEventMatchingMask:(NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp)
+                                                untilDate:[NSDate distantFuture]
+                                                   inMode:NSEventTrackingRunLoopMode
+                                                  dequeue:YES];
+            if (!event) break;
+
+            if ([event type] == NSEventTypeLeftMouseUp) {
+                break;
+            }
+
+            if ([event type] == NSEventTypeLeftMouseDragged) {
+                NSPoint currentMouse = [NSEvent mouseLocation];
+                CGFloat dx = currentMouse.x - startMouse.x;
+                CGFloat dy = currentMouse.y - startMouse.y;
+
+                NSRect newFrame = NSMakeRect(startFrame.origin.x + dx,
+                                             startFrame.origin.y + dy,
+                                             startFrame.size.width,
+                                             startFrame.size.height);
+                [g_appWindow setFrame:newFrame display:YES animate:NO];
+            }
+        }
+
+        g_isDragging = 0;
+
+        // Snap window to the nearest edge of whichever screen the mouse dropped on
+        NSPoint dropMouse = [NSEvent mouseLocation];
+        NSArray *screens = [NSScreen screens];
+        NSScreen *targetScreen = nil;
+        int targetScreenIdx = 0;
+
+        for (int i = 0; i < [screens count]; i++) {
+            NSScreen *s = [screens objectAtIndex:i];
+            if (NSPointInRect(dropMouse, [s frame])) {
+                targetScreen = s;
+                targetScreenIdx = i;
+                break;
+            }
+        }
+        if (!targetScreen) {
+            targetScreen = [g_appWindow screen] ?: [NSScreen mainScreen];
+            targetScreenIdx = (int)[screens indexOfObject:targetScreen];
+            if (targetScreenIdx < 0 || targetScreenIdx >= [screens count]) {
+                targetScreenIdx = 0;
+            }
+        }
+
+        NSRect visibleFrame = [targetScreen visibleFrame];
+        if (visibleFrame.size.width <= 0 || visibleFrame.size.height <= 0) {
+            visibleFrame = [targetScreen frame];
+        }
+
+        // Determine Left or Right edge
+        CGFloat leftDist = fabs(dropMouse.x - visibleFrame.origin.x);
+        CGFloat rightDist = fabs((visibleFrame.origin.x + visibleFrame.size.width) - dropMouse.x);
+
+        int newDockSide = (leftDist < rightDist) ? 1 : 0; // 0: Right, 1: Left
+
+        // Determine Y position ratio
+        CGFloat curY = [g_appWindow frame].origin.y;
+        CGFloat availH = visibleFrame.size.height - (CGFloat)height;
+        if (availH < 1) availH = 1;
+        CGFloat yRatio = (curY - visibleFrame.origin.y) / availH;
+        if (yRatio < 0.0) yRatio = 0.0;
+        if (yRatio > 1.0) yRatio = 1.0;
+
+        g_dockSide = newDockSide;
+        g_screenIndex = targetScreenIdx;
+        g_dockYRatio = (double)yRatio;
+
+        CGFloat targetX = (newDockSide == 0)
+            ? (visibleFrame.origin.x + visibleFrame.size.width - (CGFloat)width)
+            : visibleFrame.origin.x;
+        CGFloat targetY = visibleFrame.origin.y + availH * yRatio;
+
+        NSRect snapFrame = NSMakeRect(targetX, targetY, (CGFloat)width, (CGFloat)height);
+        [g_appWindow setFrame:snapFrame display:YES animate:YES];
+
+        goDockChangedCallback(newDockSide, targetScreenIdx, (double)yRatio);
     });
 }
 
@@ -212,6 +441,11 @@ static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
         }
 
         if (visible != 0) {
+            CGFloat cardW = (CGFloat)(w - 118);
+            CGFloat cardH = (CGFloat)(h - 16);
+            CGFloat cardX = (g_dockSide == 1) ? 110.0 : 8.0;
+            CGFloat closeX = (g_dockSide == 1) ? 118.0 : 16.0;
+
             if (!g_ticketWebView && g_appWindow) {
                 NSView *contentView = [g_appWindow contentView];
                 if (contentView) {
@@ -223,7 +457,7 @@ static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
                     [userContent addUserScript:script];
                     config.userContentController = userContent;
 
-                    g_ticketWebView = [[WKWebView alloc] initWithFrame:NSMakeRect(8, 8, (CGFloat)(w-118), (CGFloat)(h-16)) configuration:config];
+                    g_ticketWebView = [[WKWebView alloc] initWithFrame:NSMakeRect(cardX, 8, cardW, cardH) configuration:config];
                     [g_ticketWebView setWantsLayer:YES];
                     [g_ticketWebView.layer setCornerRadius:14.0];
                     [g_ticketWebView.layer setMasksToBounds:YES];
@@ -233,7 +467,7 @@ static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
                     [contentView addSubview:g_ticketWebView];
 
                     // Floating sleek Close button (✕)
-                    g_closeButton = [[NSButton alloc] initWithFrame:NSMakeRect(16, (CGFloat)(h - 44), 28, 28)];
+                    g_closeButton = [[NSButton alloc] initWithFrame:NSMakeRect(closeX, (CGFloat)(h - 44), 28, 28)];
                     [g_closeButton setTitle:@"✕"];
                     [g_closeButton setBezelStyle:NSBezelStyleCircular];
                     [g_closeButton setButtonType:NSButtonTypeMomentaryPushIn];
@@ -247,9 +481,7 @@ static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
                 }
             }
             if (g_ticketWebView) {
-                CGFloat cardW = (CGFloat)(w - 118);
-                CGFloat cardH = (CGFloat)(h - 16);
-                [g_ticketWebView setFrame:NSMakeRect(8, 8, cardW, cardH)];
+                [g_ticketWebView setFrame:NSMakeRect(cardX, 8, cardW, cardH)];
                 [g_ticketWebView.layer setCornerRadius:14.0];
                 [g_ticketWebView.layer setMasksToBounds:YES];
                 [g_ticketWebView.layer setBorderWidth:1.5];
@@ -258,7 +490,7 @@ static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
                 [g_ticketWebView evaluateJavaScript:kHideJiraHeaderScript completionHandler:nil];
             }
             if (g_closeButton) {
-                [g_closeButton setFrame:NSMakeRect(16, (CGFloat)(h - 44), 28, 28)];
+                [g_closeButton setFrame:NSMakeRect(closeX, (CGFloat)(h - 44), 28, 28)];
                 [g_closeButton setHidden:NO];
             }
             if (g_appWindow) {
@@ -298,6 +530,24 @@ static void DarwinLoadMobileTicketHTML(const char *htmlStr, const char *baseURLS
         [g_ticketWebView loadHTMLString:nsHtml baseURL:baseURL];
     });
 }
+
+static void DarwinCopyText(const char *text) {
+    if (!text) return;
+    NSString *nsText = [NSString stringWithUTF8String:text];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSPasteboard *pb = [NSPasteboard generalPasteboard];
+        [pb clearContents];
+        [pb setString:nsText forType:NSPasteboardTypeString];
+    });
+}
+
+static char *DarwinPasteText(void) {
+    NSPasteboard *pb = [NSPasteboard generalPasteboard];
+    NSString *val = [pb stringForType:NSPasteboardTypeString];
+    if (!val) return NULL;
+    const char *utf8 = [val UTF8String];
+    return utf8 ? strdup(utf8) : NULL;
+}
 */
 import "C"
 import (
@@ -306,8 +556,10 @@ import (
 )
 
 var (
-	collapseMu       sync.Mutex
-	collapseCallback func()
+	collapseMu         sync.Mutex
+	collapseCallback   func()
+	dockChangeMu       sync.Mutex
+	dockChangeCallback DockChangeCallback
 )
 
 //export goCollapseCallback
@@ -320,26 +572,56 @@ func goCollapseCallback() {
 	}
 }
 
+//export goDockChangedCallback
+func goDockChangedCallback(side C.int, screenIndex C.int, yRatio C.double) {
+	dockChangeMu.Lock()
+	cb := dockChangeCallback
+	dockChangeMu.Unlock()
+	if cb != nil {
+		cb(DockSide(side), int(screenIndex), float64(yRatio))
+	}
+}
+
 func RegisterCollapseHandler(cb func()) {
 	collapseMu.Lock()
 	collapseCallback = cb
 	collapseMu.Unlock()
 }
 
+func RegisterDockChangeHandler(cb DockChangeCallback) {
+	dockChangeMu.Lock()
+	dockChangeCallback = cb
+	dockChangeMu.Unlock()
+}
+
 type DarwinManager struct {
-	mu    sync.RWMutex
-	state WindowState
+	mu            sync.RWMutex
+	state         WindowState
+	dockSide      DockSide
+	monitorIndex  int
+	posYRatio     float64
+	currentWidth  int
+	currentHeight int
 }
 
 func init() {
 	if DefaultManager == nil {
 		DefaultManager = &DarwinManager{
-			state: StateRest,
+			state:         StateRest,
+			dockSide:      DockSideRight,
+			monitorIndex:  0,
+			posYRatio:     0.5,
+			currentWidth:  32,
+			currentHeight: 224,
 		}
 	}
 }
 
 func (m *DarwinManager) InitEdgeRail(width, height int) error {
+	m.mu.Lock()
+	m.currentWidth = width
+	m.currentHeight = height
+	m.mu.Unlock()
 	m.SetState(StateRest, width, height)
 	return nil
 }
@@ -347,20 +629,197 @@ func (m *DarwinManager) InitEdgeRail(width, height int) error {
 func (m *DarwinManager) SetState(state WindowState, width, height int) {
 	m.mu.Lock()
 	m.state = state
+	m.currentWidth = width
+	m.currentHeight = height
 	st := m.state
 	m.mu.Unlock()
-	C.DarwinDockToRightEdge(C.int(width), C.int(height), C.int(st))
+	C.DarwinDock(C.int(width), C.int(height), C.int(st))
+}
+
+func (m *DarwinManager) Dock(width, height int) {
+	m.mu.Lock()
+	m.currentWidth = width
+	m.currentHeight = height
+	st := m.state
+	m.mu.Unlock()
+	C.DarwinDock(C.int(width), C.int(height), C.int(st))
 }
 
 func (m *DarwinManager) DockToRightEdge(width, height int) {
+	m.SetDockSide(DockSideRight)
+	m.Dock(width, height)
+}
+
+func (m *DarwinManager) SetDockSide(side DockSide) {
+	m.mu.Lock()
+	m.dockSide = side
+	w := m.currentWidth
+	h := m.currentHeight
+	if w <= 0 {
+		w = 32
+	}
+	if h <= 0 {
+		h = 224
+	}
+	idx := m.monitorIndex
+	ratio := m.posYRatio
+	m.mu.Unlock()
+
+	C.DarwinSetDockPosition(C.int(side), C.int(idx), C.double(ratio), C.int(w), C.int(h))
+}
+
+func (m *DarwinManager) GetDockSide() DockSide {
 	m.mu.RLock()
-	st := m.state
+	defer m.mu.RUnlock()
+	return m.dockSide
+}
+
+func (m *DarwinManager) SetMonitor(screenIndex int) {
+	m.mu.Lock()
+	m.monitorIndex = screenIndex
+	side := m.dockSide
+	ratio := m.posYRatio
+	w := m.currentWidth
+	h := m.currentHeight
+	if w <= 0 {
+		w = 32
+	}
+	if h <= 0 {
+		h = 224
+	}
+	m.mu.Unlock()
+
+	C.DarwinSetDockPosition(C.int(side), C.int(screenIndex), C.double(ratio), C.int(w), C.int(h))
+}
+
+func (m *DarwinManager) GetSelectedMonitor() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.monitorIndex
+}
+
+func (m *DarwinManager) GetMonitors() []MonitorInfo {
+	count := int(C.DarwinGetScreensCount())
+	if count <= 0 {
+		return []MonitorInfo{
+			{Index: 0, Name: "Main Display", IsMain: true, Width: 1920, Height: 1080},
+		}
+	}
+	var res []MonitorInfo
+	nameBuf := make([]byte, 256)
+	for i := 0; i < count; i++ {
+		var isMain, x, y, w, h C.int
+		C.DarwinGetScreenInfo(
+			C.int(i),
+			(*C.char)(unsafe.Pointer(&nameBuf[0])),
+			C.int(len(nameBuf)),
+			&isMain,
+			&x,
+			&y,
+			&w,
+			&h,
+		)
+		name := C.GoString((*C.char)(unsafe.Pointer(&nameBuf[0])))
+		if name == "" {
+			name = "Display"
+		}
+		res = append(res, MonitorInfo{
+			Index:  i,
+			Name:   name,
+			IsMain: isMain != 0,
+			X:      int(x),
+			Y:      int(y),
+			Width:  int(w),
+			Height: int(h),
+		})
+	}
+	return res
+}
+
+func (m *DarwinManager) SetPositionRatio(ratio float64) {
+	if ratio < 0.0 {
+		ratio = 0.0
+	}
+	if ratio > 1.0 {
+		ratio = 1.0
+	}
+	m.mu.Lock()
+	m.posYRatio = ratio
+	side := m.dockSide
+	idx := m.monitorIndex
+	w := m.currentWidth
+	h := m.currentHeight
+	if w <= 0 {
+		w = 32
+	}
+	if h <= 0 {
+		h = 224
+	}
+	m.mu.Unlock()
+
+	C.DarwinSetDockPosition(C.int(side), C.int(idx), C.double(ratio), C.int(w), C.int(h))
+}
+
+func (m *DarwinManager) GetPositionRatio() float64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.posYRatio
+}
+
+func (m *DarwinManager) StartWindowDrag() {
+	m.mu.RLock()
+	w := m.currentWidth
+	h := m.currentHeight
+	if w <= 0 {
+		w = 32
+	}
+	if h <= 0 {
+		h = 224
+	}
 	m.mu.RUnlock()
-	C.DarwinDockToRightEdge(C.int(width), C.int(height), C.int(st))
+	C.DarwinStartWindowDrag(C.int(w), C.int(h))
 }
 
 func (m *DarwinManager) OpenTicketURL(url string) error {
 	return OpenURL(url)
+}
+
+func (m *DarwinManager) SetAlwaysOnTop(alwaysOnTop bool) {
+	val := 0
+	if alwaysOnTop {
+		val = 1
+	}
+	C.DarwinSetAlwaysOnTop(C.int(val))
+}
+
+func (m *DarwinManager) GetAlwaysOnTop() bool {
+	return C.DarwinGetAlwaysOnTop() != 0
+}
+
+func (m *DarwinManager) SetAutoHide(autoHide bool) {
+	val := 0
+	if autoHide {
+		val = 1
+	}
+	C.DarwinSetAutoHide(C.int(val))
+}
+
+func (m *DarwinManager) GetAutoHide() bool {
+	return C.DarwinGetAutoHide() != 0
+}
+
+func (m *DarwinManager) SetTucked(tucked bool, width, height int) {
+	val := 0
+	if tucked {
+		val = 1
+	}
+	if width <= 0 {
+		width = 32
+	}
+	if height <= 0 {
+		height = 224
+	}
+	C.DarwinSetTucked(C.int(val), C.int(width), C.int(height))
 }
 
 func IsMouseInside() bool {
@@ -390,4 +849,19 @@ func LoadMobileTicketHTML(html string, baseURL string) {
 		defer C.free(unsafe.Pointer(cBase))
 	}
 	C.DarwinLoadMobileTicketHTML(cHTML, cBase)
+}
+
+func NativeCopyText(text string) {
+	cText := C.CString(text)
+	defer C.free(unsafe.Pointer(cText))
+	C.DarwinCopyText(cText)
+}
+
+func NativePasteText() (string, bool) {
+	cStr := C.DarwinPasteText()
+	if cStr == nil {
+		return "", false
+	}
+	defer C.free(unsafe.Pointer(cStr))
+	return C.GoString(cStr), true
 }

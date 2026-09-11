@@ -13,6 +13,7 @@ type InstanceConfig struct {
 	Email    string `json:"email"`
 	APIToken string `json:"api_token"`
 	JQLQuery string `json:"jql_query"`
+	Color    string `json:"color,omitempty"` // User-defined profile accent color (hex string)
 }
 
 // MaskedAPIToken returns a masked representation of the instance API token for logging and UI display.
@@ -36,6 +37,11 @@ type Config struct {
 	PinnedKeys   []string         `json:"pinned_keys"`   // Pinned issue keys
 	DemoMode     bool             `json:"demo_mode"`     // Mock / demo workflow without live Jira (default: false)
 	DebugMode    bool             `json:"debug_mode"`    // Verbose logging of API requests & auth headers
+	DockSide     int              `json:"dock_side"`     // 0: Right Edge, 1: Left Edge
+	MonitorIndex int              `json:"monitor_index"` // Display index (0..N-1)
+	PosYRatio    float64          `json:"pos_y_ratio"`   // Vertical anchor position ratio (0.0..1.0, default 0.5)
+	AlwaysOnTop  bool             `json:"always_on_top"` // Float HUD window above all regular windows (default: true)
+	AutoHide     bool             `json:"auto_hide"`     // macOS Dock-style auto-hide when resting (default: false)
 }
 
 // MaskedAPIToken returns a masked representation of the active/primary API token.
@@ -85,6 +91,7 @@ func DefaultConfig() Config {
 				Email:    "frank.hess@avono.de",
 				APIToken: "",
 				JQLQuery: "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC",
+				Color:    "#38bdf8",
 			},
 			{
 				ID:       "inst-2",
@@ -93,6 +100,7 @@ func DefaultConfig() Config {
 				Email:    "frank.hess@avono.de",
 				APIToken: "",
 				JQLQuery: "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC",
+				Color:    "#a855f7",
 			},
 		},
 		ActiveInstID: "inst-1",
@@ -105,6 +113,11 @@ func DefaultConfig() Config {
 		PinnedKeys:   []string{},
 		DemoMode:     false,
 		DebugMode:    true,
+		DockSide:     0,
+		MonitorIndex: 0,
+		PosYRatio:    0.5,
+		AlwaysOnTop:  true,
+		AutoHide:     false,
 	}
 }
 

@@ -51,17 +51,27 @@ type AppView struct {
 	hoveredTabIdx   int  // Index of hovered tab in Fan mode (-1 if none)
 	hoveredSettings bool // True if settings button is hovered in Fan mode
 
+	// Dock and Display state
+	dockSide        window.DockSide
+	selectedMonitor int
+	monitors        []window.MonitorInfo
+	restHoverStart  time.Time
+	alwaysOnTop     bool
+	autoHide        bool
+	isTucked        bool
+
 	// Multi-instance filtering & settings tracking
 	activeInstIdx   int // Currently viewed instance filter in Fan & Expanded states (0..n-1)
 	selectedInstIdx int // Currently edited instance in Settings overlay
 
-	// Active instance field buffers (5 fields)
+	// Active instance field buffers (5 fields + color)
 	nameVal     string
 	urlVal      string
 	emailVal    string
 	tokenVal    string
 	jqlVal      string
 	intervalVal string
+	colorVal    string
 	demoMode    bool
 	debugMode   bool
 	activeField int       // 1..5
@@ -78,6 +88,12 @@ type appViewStateSnapshot struct {
 	bounds          geometry.Rect
 	state           window.WindowState
 	showSettings    bool
+	dockSide        window.DockSide
+	selectedMonitor int
+	monitors        []window.MonitorInfo
+	alwaysOnTop     bool
+	autoHide        bool
+	isTucked        bool
 	issues          []jira.Issue
 	filteredIssues  []jira.Issue
 	activeIdx       int
@@ -97,6 +113,7 @@ type appViewStateSnapshot struct {
 	tokenVal        string
 	jqlVal          string
 	intervalVal     string
+	colorVal        string
 	demoMode        bool
 	debugMode       bool
 	activeField     int
@@ -126,6 +143,10 @@ func NewAppView(
 		showSettings:    false,
 		hoveredTabIdx:   -1,
 		hoveredSettings: false,
+		dockSide:        window.DockSide(cfg.DockSide),
+		selectedMonitor: cfg.MonitorIndex,
+		alwaysOnTop:     cfg.AlwaysOnTop,
+		autoHide:        cfg.AutoHide,
 		activeInstIdx:   0,
 		selectedInstIdx: 0,
 		demoMode:        cfg.DemoMode,
@@ -135,6 +156,17 @@ func NewAppView(
 		ctx:             ctx,
 		cancel:          cancel,
 		cacheDirty:      true,
+	}
+
+	if window.DefaultManager != nil {
+		window.DefaultManager.SetDockSide(v.dockSide)
+		window.DefaultManager.SetMonitor(v.selectedMonitor)
+		window.DefaultManager.SetAlwaysOnTop(cfg.AlwaysOnTop)
+		window.DefaultManager.SetAutoHide(cfg.AutoHide)
+		if cfg.PosYRatio > 0 && cfg.PosYRatio <= 1.0 {
+			window.DefaultManager.SetPositionRatio(cfg.PosYRatio)
+		}
+		v.monitors = window.DefaultManager.GetMonitors()
 	}
 
 	v.mu.Lock()
@@ -164,6 +196,24 @@ func NewAppView(
 		}
 	})
 
+	// Register dock change handler (triggered when user drags window across displays/edges)
+	window.RegisterDockChangeHandler(func(side window.DockSide, monIdx int, yRatio float64) {
+		v.mu.Lock()
+		v.dockSide = side
+		v.selectedMonitor = monIdx
+		v.config.DockSide = int(side)
+		v.config.MonitorIndex = monIdx
+		v.config.PosYRatio = yRatio
+		cfgToSave := v.config
+		v.mu.Unlock()
+
+		_ = jira.SaveConfig(cfgToSave)
+		v.MarkNeedsLayout()
+		if v.onRedraw != nil {
+			v.onRedraw()
+		}
+	})
+
 	// Cancelable OS-level mouse location poller for Fan auto-collapse
 	v.wg.Add(1)
 	go func() {
@@ -182,13 +232,33 @@ func NewAppView(
 				searchAct := v.searchActive || v.searchQuery != ""
 				v.mu.Unlock()
 
+				inside := window.IsMouseInside()
 				if st == window.StateFan && !searchAct {
-					if window.IsMouseInside() {
+					if inside {
 						v.mu.Lock()
 						v.lastHover = time.Now()
 						v.mu.Unlock()
 					} else if !lastH.IsZero() && time.Since(lastH) > 300*time.Millisecond {
 						v.SetState(window.StateRest)
+					}
+				} else if st == window.StateRest {
+					if inside {
+						v.mu.Lock()
+						autoH := v.autoHide
+						tucked := v.isTucked
+						v.mu.Unlock()
+						if autoH && tucked {
+							v.setTucked(false)
+						}
+					} else {
+						v.mu.Lock()
+						v.restHoverStart = time.Time{}
+						autoH := v.autoHide
+						tucked := v.isTucked
+						v.mu.Unlock()
+						if autoH && !tucked {
+							v.setTucked(true)
+						}
 					}
 				}
 			}
@@ -244,6 +314,99 @@ func (v *AppView) Close() {
 	v.wg.Wait()
 }
 
+// SetDockSide sets docking edge and smoothly repositions the window
+func (v *AppView) SetDockSide(side window.DockSide) {
+	v.mu.Lock()
+	v.dockSide = side
+	v.config.DockSide = int(side)
+	cfg := v.config
+	v.mu.Unlock()
+
+	_ = jira.SaveConfig(cfg)
+	if window.DefaultManager != nil {
+		window.DefaultManager.SetDockSide(side)
+	}
+	v.MarkNeedsLayout()
+	if v.onRedraw != nil {
+		v.onRedraw()
+	}
+}
+
+// SetMonitor sets active monitor display and smoothly repositions the window
+func (v *AppView) SetMonitor(monIdx int) {
+	v.mu.Lock()
+	v.selectedMonitor = monIdx
+	v.config.MonitorIndex = monIdx
+	cfg := v.config
+	v.mu.Unlock()
+
+	_ = jira.SaveConfig(cfg)
+	if window.DefaultManager != nil {
+		window.DefaultManager.SetMonitor(monIdx)
+	}
+	v.MarkNeedsLayout()
+	if v.onRedraw != nil {
+		v.onRedraw()
+	}
+}
+
+// StartDrag initiates Cocoa window dragging across displays
+func (v *AppView) StartDrag() {
+	if window.DefaultManager != nil {
+		window.DefaultManager.StartWindowDrag()
+	}
+}
+
+// SetAlwaysOnTop toggles whether the HUD floats above all windows.
+func (v *AppView) SetAlwaysOnTop(alwaysOnTop bool) {
+	v.mu.Lock()
+	v.alwaysOnTop = alwaysOnTop
+	v.config.AlwaysOnTop = alwaysOnTop
+	cfg := v.config
+	v.mu.Unlock()
+
+	window.SetAlwaysOnTop(alwaysOnTop)
+	_ = jira.SaveConfig(cfg)
+	v.MarkNeedsLayout()
+	if v.onRedraw != nil {
+		v.onRedraw()
+	}
+}
+
+// SetAutoHide toggles macOS Dock-style edge auto-hide.
+func (v *AppView) SetAutoHide(autoHide bool) {
+	v.mu.Lock()
+	v.autoHide = autoHide
+	v.config.AutoHide = autoHide
+	cfg := v.config
+	v.mu.Unlock()
+
+	window.SetAutoHide(autoHide)
+	if !autoHide {
+		v.setTucked(false)
+	}
+	_ = jira.SaveConfig(cfg)
+	v.MarkNeedsLayout()
+	if v.onRedraw != nil {
+		v.onRedraw()
+	}
+}
+
+func (v *AppView) setTucked(tucked bool) {
+	v.mu.Lock()
+	if v.isTucked == tucked {
+		v.mu.Unlock()
+		return
+	}
+	v.isTucked = tucked
+	st := v.state
+	v.mu.Unlock()
+
+	if st == window.StateRest {
+		window.SetTucked(tucked, 32, 224)
+	}
+}
+
 func (v *AppView) invalidateFilterCacheLocked() {
 	v.cacheDirty = true
 	v.filteredCache = nil
@@ -260,6 +423,7 @@ func (v *AppView) loadInstanceFieldsLocked(idx int) {
 	v.emailVal = inst.Email
 	v.tokenVal = inst.APIToken
 	v.jqlVal = inst.JQLQuery
+	v.colorVal = inst.Color
 	v.activeField = 0
 	v.cursorPos = len(inst.Name)
 	v.selectAll = false
@@ -274,6 +438,7 @@ func (v *AppView) saveCurrentInstanceFieldsLocked() {
 	v.config.Instances[v.selectedInstIdx].Email = strings.TrimSpace(v.emailVal)
 	v.config.Instances[v.selectedInstIdx].APIToken = sanitizeToken(v.tokenVal)
 	v.config.Instances[v.selectedInstIdx].JQLQuery = strings.TrimSpace(v.jqlVal)
+	v.config.Instances[v.selectedInstIdx].Color = strings.TrimSpace(v.colorVal)
 }
 
 func isIssueForInstance(iss jira.Issue, inst jira.InstanceConfig, instIdx int) bool {
@@ -353,10 +518,19 @@ func (v *AppView) snapshot() appViewStateSnapshot {
 	filteredClone := make([]jira.Issue, len(filtered))
 	copy(filteredClone, filtered)
 
+	monitors := make([]window.MonitorInfo, len(v.monitors))
+	copy(monitors, v.monitors)
+
 	return appViewStateSnapshot{
 		bounds:          v.Bounds(),
 		state:           v.state,
 		showSettings:    v.showSettings,
+		dockSide:        v.dockSide,
+		selectedMonitor: v.selectedMonitor,
+		monitors:        monitors,
+		alwaysOnTop:     v.alwaysOnTop,
+		autoHide:        v.autoHide,
+		isTucked:        v.isTucked,
 		issues:          issues,
 		filteredIssues:  filteredClone,
 		activeIdx:       v.activeIdx,
@@ -376,6 +550,7 @@ func (v *AppView) snapshot() appViewStateSnapshot {
 		tokenVal:        v.tokenVal,
 		jqlVal:          v.jqlVal,
 		intervalVal:     v.intervalVal,
+		colorVal:        v.colorVal,
 		demoMode:        v.demoMode,
 		debugMode:       v.debugMode,
 		activeField:     v.activeField,
@@ -424,6 +599,10 @@ func (v *AppView) SetState(newState window.WindowState) {
 	}
 	showSettings := v.showSettings
 	v.mu.Unlock()
+
+	if newState != window.StateRest {
+		v.setTucked(false)
+	}
 
 	w, h := v.computeSize(newState)
 	// Synchronously update bounds to eliminate any hit-test race conditions
@@ -689,6 +868,11 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		// 2. Complete, crisp, prominent frosted white border all the way around
 		canvas.StrokeRoundRect(pillRect, widget.RGBA8(255, 255, 255, 120), pillRadius, 1.5)
 
+		// 3. Subtle top drag handle grip dots (···)
+		canvas.DrawCircle(geometry.Pt(b.Min.X+w/2-5, b.Min.Y+5), 1.2, widget.RGBA8(255, 255, 255, 120))
+		canvas.DrawCircle(geometry.Pt(b.Min.X+w/2, b.Min.Y+5), 1.2, widget.RGBA8(255, 255, 255, 120))
+		canvas.DrawCircle(geometry.Pt(b.Min.X+w/2+5, b.Min.Y+5), 1.2, widget.RGBA8(255, 255, 255, 120))
+
 		instCount := len(s.instances)
 		if instCount == 0 {
 			instCount = 1
@@ -721,40 +905,8 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			}
 			count := len(instIssues)
 
-			// Distinct colors per instance
-			beaconColor := widget.RGBA8(56, 189, 248, 255) // Cyan (avono)
-			beaconGlow := widget.RGBA8(56, 189, 248, 55)
-			inProgColor := widget.RGBA8(56, 189, 248, 255) // Light Cyan
-			todoColor := widget.RGBA8(14, 116, 144, 255)   // Dark Blue / Cyan
-			trackColor := widget.RGBA8(56, 189, 248, 35)   // Dim Cyan Track
-			badgeBg := widget.RGBA8(24, 34, 52, 240)
-			badgeBorder := widget.RGBA8(56, 189, 248, 140)
-
-			if idx == 1 {
-				beaconColor = widget.RGBA8(168, 85, 247, 255) // Purple (Instance 2)
-				beaconGlow = widget.RGBA8(168, 85, 247, 55)
-				inProgColor = widget.RGBA8(192, 132, 252, 255) // Light Purple
-				todoColor = widget.RGBA8(107, 33, 168, 255)    // Darker Violet
-				trackColor = widget.RGBA8(168, 85, 247, 35)    // Dim Purple Track
-				badgeBg = widget.RGBA8(38, 26, 56, 240)
-				badgeBorder = widget.RGBA8(168, 85, 247, 140)
-			} else if idx == 2 {
-				beaconColor = widget.RGBA8(234, 179, 8, 255) // Amber (Instance 3)
-				beaconGlow = widget.RGBA8(234, 179, 8, 55)
-				inProgColor = widget.RGBA8(250, 204, 21, 255) // Light Yellow/Amber
-				todoColor = widget.RGBA8(161, 98, 7, 255)     // Darker Amber
-				trackColor = widget.RGBA8(234, 179, 8, 35)    // Dim Amber Track
-				badgeBg = widget.RGBA8(48, 38, 20, 240)
-				badgeBorder = widget.RGBA8(234, 179, 8, 140)
-			} else if idx > 2 {
-				beaconColor = widget.RGBA8(34, 197, 94, 255) // Emerald
-				beaconGlow = widget.RGBA8(34, 197, 94, 55)
-				inProgColor = widget.RGBA8(74, 222, 128, 255)
-				todoColor = widget.RGBA8(21, 128, 61, 255)
-				trackColor = widget.RGBA8(34, 197, 94, 35)
-				badgeBg = widget.RGBA8(20, 44, 30, 240)
-				badgeBorder = widget.RGBA8(34, 197, 94, 140)
-			}
+			// User-defined profile accent color palette
+			beaconColor, beaconGlow, inProgColor, todoColor, trackColor, badgeBg, badgeBorder := GetInstanceColors(inst.Color, idx)
 
 			// Instance Beacon Core & Radiant Glow (Centered at X: 16)
 			beaconCenter := geometry.Pt(b.Min.X+w/2, secY+8)
@@ -848,18 +1000,17 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		canvas.DrawRoundRect(railBackdrop, widget.RGBA8(20, 28, 44, 200), 14)
 		canvas.StrokeRoundRect(railBackdrop, widget.RGBA8(255, 255, 255, 100), 14, 1.5)
 
-		// Top Instance Header Pill
+		// 1. Top subtle Drag Handle Bar (grab affordance)
+		dragBarRect := geometry.NewRect(b.Min.X+w/2-14, b.Min.Y+3, 28, 3)
+		canvas.DrawRoundRect(dragBarRect, widget.RGBA8(255, 255, 255, 90), 1.5)
+
+		// 2. Top Instance Header Pill
 		instName := "All Instances"
 		instBeaconColor := widget.RGBA8(56, 189, 248, 240)
 		if s.activeInstIdx >= 0 && s.activeInstIdx < len(s.instances) {
-			instName = s.instances[s.activeInstIdx].Name
-			if s.activeInstIdx == 1 {
-				instBeaconColor = widget.RGBA8(168, 85, 247, 240)
-			} else if s.activeInstIdx == 2 {
-				instBeaconColor = widget.RGBA8(234, 179, 8, 240)
-			} else if s.activeInstIdx > 2 {
-				instBeaconColor = widget.RGBA8(34, 197, 94, 240)
-			}
+			inst := s.instances[s.activeInstIdx]
+			instName = inst.Name
+			instBeaconColor, _, _, _, _, _, _ = GetInstanceColors(inst.Color, s.activeInstIdx)
 		}
 		if len(instName) > 14 {
 			instName = instName[:12] + ".."
@@ -872,7 +1023,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		canvas.DrawCircle(geometry.Pt(b.Min.X+16, b.Min.Y+19), 3.5, instBeaconColor)
 		canvas.DrawText(instName, geometry.NewRect(b.Min.X+22, b.Min.Y+12, w-30, 14), 10, widget.RGBA8(235, 245, 255, 255), true, widget.TextAlignCenter)
 
-		// Search Bar
+		// 3. Search Bar with Clear Button & Blinking Cursor
 		searchRect := geometry.NewRect(b.Min.X+7, b.Min.Y+34, w-14, 22)
 		searchBg := widget.RGBA8(14, 20, 30, 220)
 		searchBorder := widget.RGBA8(255, 255, 255, 35)
@@ -889,16 +1040,33 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			searchTxt = "Search..."
 			searchColor = widget.RGBA8(140, 155, 180, 255)
 		}
-		sTxtRect := geometry.NewRect(b.Min.X+12, b.Min.Y+38, w-24, 14)
+		sTxtRect := geometry.NewRect(b.Min.X+12, b.Min.Y+38, w-38, 14)
 		canvas.DrawText(searchTxt, sTxtRect, 9, searchColor, false, widget.TextAlignLeft)
 
-		// Tab Area (Strictly bounded between top search and bottom settings tab)
+		// Blinking search cursor
+		if s.searchActive && (time.Now().UnixMilli()/500)%2 == 0 {
+			curOffset := measureTextWidth(s.searchQuery, 9)
+			curX := b.Min.X + 12 + curOffset + 1.0
+			if curX < b.Min.X+w-28 {
+				canvas.DrawLine(geometry.Pt(curX, b.Min.Y+37), geometry.Pt(curX, b.Min.Y+51), widget.RGBA8(255, 255, 255, 220), 1.5)
+			}
+		}
+
+		// Clear search "✕" button
+		if s.searchQuery != "" {
+			clearBtnRect := geometry.NewRect(b.Min.X+w-24, b.Min.Y+38, 14, 14)
+			canvas.DrawCircle(geometry.Pt(b.Min.X+w-17, b.Min.Y+45), 6.5, widget.RGBA8(255, 255, 255, 40))
+			canvas.DrawText("✕", clearBtnRect, 8, widget.RGBA8(255, 255, 255, 220), true, widget.TextAlignCenter)
+		}
+
+		// 4. Tab Area (Smoothly clipped between top search and bottom settings tab)
 		tabMinY := b.Min.Y + float32(60)
 		tabMaxY := b.Min.Y + h - float32(50)
 		tabStartY := tabMinY - s.scrollY
 		tabHeight := float32(48)
 		tabGap := float32(6)
 
+		canvas.PushClip(geometry.NewRect(b.Min.X+1, tabMinY, w-2, tabMaxY-tabMinY))
 		if len(s.filteredIssues) == 0 {
 			noRect := geometry.NewRect(b.Min.X+8, b.Min.Y+74, w-16, 30)
 			canvas.DrawText("No tickets", noRect, 10, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignCenter)
@@ -906,8 +1074,8 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			for i, iss := range s.filteredIssues {
 				tabY := tabStartY + float32(i)*(tabHeight+tabGap)
 
-				// Clip strictly so overflow tabs never spill over the header or settings footer
-				if tabY < tabMinY-2 || tabY+tabHeight > tabMaxY+2 {
+				// Skip if completely out of viewport
+				if tabY+tabHeight < tabMinY || tabY > tabMaxY {
 					continue
 				}
 
@@ -917,7 +1085,11 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				tabX := b.Min.X + 7
 				tabW := w - 14
 				if isHovered {
-					tabX = b.Min.X + 3
+					if s.dockSide == window.DockSideLeft {
+						tabX = b.Min.X + 11 // Lift inward to the right
+					} else {
+						tabX = b.Min.X + 3  // Lift inward to the left
+					}
 					tabW = w - 10
 				}
 
@@ -927,8 +1099,12 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				if isHovered {
 					// Glowing animated Dock-style hover lift
 					canvas.StrokeRoundRect(tabRect, widget.RGBA8(255, 255, 255, 240), 8, 1.5)
-					// Vibrant indicator pill on left edge
-					canvas.DrawRoundRect(geometry.NewRect(tabX+2, tabY+8, 3, tabHeight-16), tabTheme.Foreground, 1.5)
+					// Vibrant indicator pill on edge facing inward
+					pillX := tabX + 2
+					if s.dockSide == window.DockSideLeft {
+						pillX = tabX + tabW - 5
+					}
+					canvas.DrawRoundRect(geometry.NewRect(pillX, tabY+8, 3, tabHeight-16), tabTheme.Foreground, 1.5)
 				} else {
 					canvas.StrokeRoundRect(tabRect, tabTheme.Border, 8, 1.0)
 				}
@@ -950,8 +1126,9 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				canvas.DrawText(shortStatus, statusRect, 9, secColor, isHovered, widget.TextAlignCenter)
 			}
 		}
+		canvas.PopClip()
 
-		// Scroll Indicator
+		// 5. Scroll Indicator
 		totalTabH := float32(len(s.filteredIssues)) * (tabHeight + tabGap)
 		viewTabH := tabMaxY - tabMinY
 		if totalTabH > viewTabH && totalTabH > 0 {
@@ -969,11 +1146,11 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			canvas.DrawRoundRect(thumbRect, widget.RGBA8(255, 255, 255, 140), 1.5)
 		}
 
-		// Divider Line before Settings
+		// 6. Divider Line before Settings
 		dividerY := b.Min.Y + h - 50
 		canvas.DrawLine(geometry.Pt(b.Min.X+10, dividerY), geometry.Pt(b.Min.X+w-10, dividerY), widget.RGBA8(255, 255, 255, 55), 1.0)
 
-		// Settings Tab
+		// 7. Settings Tab
 		settingsTabY := b.Min.Y + h - 42
 		setX := b.Min.X + 7
 		setW := w - 14
@@ -999,14 +1176,23 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	tabBarWidth := float32(110)
 	cardAreaWidth := w - tabBarWidth - 14
 
-	// Right-side Dock Shelf Column
 	tabStartX := b.Min.X + w - tabBarWidth
+	cardStartX := b.Min.X + 8
+	if s.dockSide == window.DockSideLeft {
+		tabStartX = b.Min.X + 6
+		cardStartX = b.Min.X + tabBarWidth + 8
+	}
+
 	dockShelfRect := geometry.NewRect(tabStartX-2, b.Min.Y+8, tabBarWidth-4, h-16)
 	canvas.DrawRoundRect(dockShelfRect, widget.RGBA8(20, 28, 44, 175), 12)
 	canvas.StrokeRoundRect(dockShelfRect, widget.RGBA8(255, 255, 255, 80), 12, 1.5)
 
+	// Top subtle drag bar on the dock shelf
+	shelfDragRect := geometry.NewRect(tabStartX+(tabBarWidth-32)/2, b.Min.Y+12, 28, 3)
+	canvas.DrawRoundRect(shelfDragRect, widget.RGBA8(255, 255, 255, 90), 1.5)
+
 	// Draw side tabs inside the dock shelf with strict bounds clipping
-	tabMinY := b.Min.Y + float32(14)
+	tabMinY := b.Min.Y + float32(20)
 	tabMaxY := b.Min.Y + h - float32(56)
 	tabStartY := tabMinY - s.scrollY
 	tabHeight := float32(50)
@@ -1017,10 +1203,10 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		activeKey = s.issues[s.activeIdx].Key
 	}
 
+	canvas.PushClip(geometry.NewRect(tabStartX-2, tabMinY, tabBarWidth-4, tabMaxY-tabMinY))
 	for i, iss := range s.filteredIssues {
 		tabY := tabStartY + float32(i)*(tabHeight+tabGap)
 
-		// Clip strictly so overflow tabs never spill over the top rounded shelf edge or bottom settings tab
 		if tabY < tabMinY-2 || tabY+tabHeight > tabMaxY+2 {
 			continue
 		}
@@ -1054,6 +1240,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		statusRect := geometry.NewRect(tabX+2, tabY+26, tabWidth-4, 14)
 		canvas.DrawText(shortStatus, statusRect, 9, tabTheme.Secondary, false, widget.TextAlignCenter)
 	}
+	canvas.PopClip()
 
 	// Scroll Indicator in Expanded Rail
 	totalRailH := float32(len(s.filteredIssues)) * (tabHeight + tabGap)
@@ -1069,15 +1256,19 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		}
 		thumbH := float32(28)
 		thumbY := tabMinY + scrollRatio*(viewRailH-thumbH)
-		thumbRect := geometry.NewRect(b.Min.X+w-6, thumbY, 3, thumbH)
+		scrollThumbX := tabStartX + tabBarWidth - 8
+		if s.dockSide == window.DockSideLeft {
+			scrollThumbX = tabStartX + 2
+		}
+		thumbRect := geometry.NewRect(scrollThumbX, thumbY, 3, thumbH)
 		canvas.DrawRoundRect(thumbRect, widget.RGBA8(255, 255, 255, 150), 1.5)
 	}
 
 	// Dock Divider Line
 	dividerY := b.Min.Y + h - 56
-	canvas.DrawLine(geometry.Pt(tabStartX+8, dividerY), geometry.Pt(b.Min.X+w-14, dividerY), widget.RGBA8(255, 255, 255, 55), 1.0)
+	canvas.DrawLine(geometry.Pt(tabStartX+8, dividerY), geometry.Pt(tabStartX+tabBarWidth-12, dividerY), widget.RGBA8(255, 255, 255, 55), 1.0)
 
-	// Settings tab at bottom right
+	// Settings tab at bottom of dock shelf
 	settingsTabY := b.Min.Y + h - 48
 	settingsTabRect := geometry.NewRect(tabStartX+2, settingsTabY, tabBarWidth-14, 34)
 	settingsBg := widget.RGBA8(36, 46, 66, 220)
@@ -1091,7 +1282,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 
 	// Settings Overlay (if active)
 	if s.showSettings {
-		cardRect := geometry.NewRect(b.Min.X+8, b.Min.Y+8, cardAreaWidth, h-16)
+		cardRect := geometry.NewRect(cardStartX, b.Min.Y+8, cardAreaWidth, h-16)
 		v.drawSettingsOverlay(ctx, canvas, cardRect, s)
 	}
 
@@ -1220,6 +1411,7 @@ func (v *AppView) drawSettingsOverlay(ctx widget.Context, canvas widget.Canvas, 
 		textX := inpRect.Min.X + 8
 		textY := inpRect.Min.Y + 5
 
+		canvas.PushClip(geometry.NewRect(inpRect.Min.X+4, inpRect.Min.Y+2, inpRect.Width()-8, inpRect.Height()-4))
 		if displayVal == "" && !isFocused {
 			vRect := geometry.NewRect(textX, textY, inpRect.Width()-16, 14)
 			canvas.DrawText("(click to type or paste with ⌘V)", vRect, 11, widget.RGBA8(100, 116, 139, 255), false, widget.TextAlignLeft)
@@ -1251,7 +1443,114 @@ func (v *AppView) drawSettingsOverlay(ctx widget.Context, canvas widget.Canvas, 
 				canvas.DrawLine(cursorTop, cursorBottom, widget.RGBA8(255, 255, 255, 240), 1.5)
 			}
 		}
+		canvas.PopClip()
 	}
+
+	// 4. Profile Accent Color Picker
+	colorRowY := startY + float32(len(labels)*45) + 2
+	colorLblRect := geometry.NewRect(r.Min.X+20, colorRowY, 200, 14)
+	canvas.DrawText("Profile Accent Color", colorLblRect, 10, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
+
+	currColorHex := s.colorVal
+	if currColorHex == "" && s.selectedInstIdx < len(s.instances) {
+		currColorHex = s.instances[s.selectedInstIdx].Color
+	}
+	if currColorHex == "" {
+		currColorHex = "#38bdf8"
+	}
+
+	for k, preset := range ProfilePresets {
+		chipCenter := geometry.Pt(r.Min.X+30+float32(k)*28, colorRowY+24)
+		chipColor := preset.Color
+		isSelected := strings.EqualFold(currColorHex, preset.Hex)
+
+		if isSelected {
+			canvas.DrawCircle(chipCenter, 11, widget.RGBA8(255, 255, 255, 220))
+			canvas.DrawCircle(chipCenter, 9, chipColor)
+		} else {
+			canvas.DrawCircle(chipCenter, 8.5, chipColor)
+			canvas.StrokeCircle(chipCenter, 8.5, widget.RGBA8(255, 255, 255, 50), 1.0)
+		}
+	}
+
+	hexRect := geometry.NewRect(r.Min.X+30+float32(len(ProfilePresets))*28+8, colorRowY+17, 70, 16)
+	canvas.DrawText(currColorHex, hexRect, 10, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
+
+	// 5. Display & Docking Controls
+	dockSecY := colorRowY + 40
+	canvas.DrawLine(geometry.Pt(r.Min.X+20, dockSecY), geometry.Pt(r.Min.X+r.Width()-20, dockSecY), widget.RGBA8(255, 255, 255, 30), 1.0)
+
+	dockLblRect := geometry.NewRect(r.Min.X+20, dockSecY+8, 250, 14)
+	canvas.DrawText("Display, Docking & Window Controls", dockLblRect, 10, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
+
+	// Row 1: Edge Docking & Displays
+	row1Y := dockSecY + 24
+
+	leftEdgeRect := geometry.NewRect(r.Min.X+20, row1Y, 95, 24)
+	leftBg := widget.RGBA8(32, 40, 56, 255)
+	leftBorder := widget.RGBA8(255, 255, 255, 30)
+	if s.dockSide == window.DockSideLeft {
+		leftBg = widget.RGBA8(59, 130, 246, 200)
+		leftBorder = widget.RGBA8(255, 255, 255, 180)
+	}
+	canvas.DrawRoundRect(leftEdgeRect, leftBg, 4)
+	canvas.StrokeRoundRect(leftEdgeRect, leftBorder, 4, 1.0)
+	canvas.DrawText("◧ Left Edge", leftEdgeRect, 10, widget.RGBA8(240, 245, 255, 255), true, widget.TextAlignCenter)
+
+	rightEdgeRect := geometry.NewRect(r.Min.X+122, row1Y, 95, 24)
+	rightBg := widget.RGBA8(32, 40, 56, 255)
+	rightBorder := widget.RGBA8(255, 255, 255, 30)
+	if s.dockSide == window.DockSideRight {
+		rightBg = widget.RGBA8(59, 130, 246, 200)
+		rightBorder = widget.RGBA8(255, 255, 255, 180)
+	}
+	canvas.DrawRoundRect(rightEdgeRect, rightBg, 4)
+	canvas.StrokeRoundRect(rightEdgeRect, rightBorder, 4, 1.0)
+	canvas.DrawText("◨ Right Edge", rightEdgeRect, 10, widget.RGBA8(240, 245, 255, 255), true, widget.TextAlignCenter)
+
+	monStartX := r.Min.X + 228
+	for m, mon := range s.monitors {
+		monRect := geometry.NewRect(monStartX+float32(m)*86, row1Y, 80, 24)
+		monBg := widget.RGBA8(32, 40, 56, 255)
+		monBorder := widget.RGBA8(255, 255, 255, 30)
+		if s.selectedMonitor == mon.Index {
+			monBg = widget.RGBA8(16, 185, 129, 200)
+			monBorder = widget.RGBA8(255, 255, 255, 180)
+		}
+		canvas.DrawRoundRect(monRect, monBg, 4)
+		canvas.StrokeRoundRect(monRect, monBorder, 4, 1.0)
+		canvas.DrawText(fmt.Sprintf("Disp %d", mon.Index+1), monRect, 10, widget.RGBA8(240, 245, 255, 255), true, widget.TextAlignCenter)
+	}
+
+	// Row 2: Always On Top & Auto-Hide Mode
+	row2Y := dockSecY + 54
+
+	aotRect := geometry.NewRect(r.Min.X+20, row2Y, 135, 24)
+	aotBg := widget.RGBA8(32, 40, 56, 255)
+	aotBorder := widget.RGBA8(255, 255, 255, 30)
+	aotTxt := "Floating: Normal"
+	if s.alwaysOnTop {
+		aotBg = widget.RGBA8(59, 130, 246, 180)
+		aotBorder = widget.RGBA8(255, 255, 255, 160)
+		aotTxt = "✓ Always On Top"
+	}
+	canvas.DrawRoundRect(aotRect, aotBg, 4)
+	canvas.StrokeRoundRect(aotRect, aotBorder, 4, 1.0)
+	canvas.DrawText(aotTxt, aotRect, 10, widget.RGBA8(240, 245, 255, 255), false, widget.TextAlignCenter)
+
+	ahRect := geometry.NewRect(r.Min.X+162, row2Y, 195, 24)
+	ahBg := widget.RGBA8(32, 40, 56, 255)
+	ahBorder := widget.RGBA8(255, 255, 255, 30)
+	ahTxt := "Auto-Hide: Disabled"
+	if s.autoHide {
+		ahBg = widget.RGBA8(168, 85, 247, 180)
+		ahBorder = widget.RGBA8(255, 255, 255, 160)
+		ahTxt = "✓ Auto-Hide (macOS Dock)"
+	}
+	canvas.DrawRoundRect(ahRect, ahBg, 4)
+	canvas.StrokeRoundRect(ahRect, ahBorder, 4, 1.0)
+	canvas.DrawText(ahTxt, ahRect, 10, widget.RGBA8(240, 245, 255, 255), false, widget.TextAlignCenter)
+
 
 	// Status Message
 	if s.statusMsg != "" {
@@ -1374,10 +1673,32 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 
 	// REST STATE: Hovering specific instance or settings dot
 	if st == window.StateRest {
+		v.mu.Lock()
+		autoH := v.autoHide
+		tucked := v.isTucked
+		v.mu.Unlock()
+		if autoH && tucked {
+			v.setTucked(false)
+		}
+
 		if pos.Y >= b.Min.Y+h-28 {
-			v.OpenSettings()
+			v.mu.Lock()
+			v.hoveredSettings = true
+			v.mu.Unlock()
 			return true
 		}
+
+		v.mu.Lock()
+		if v.restHoverStart.IsZero() {
+			v.restHoverStart = time.Now()
+			v.mu.Unlock()
+			return true
+		}
+		if time.Since(v.restHoverStart) < 150*time.Millisecond {
+			v.mu.Unlock()
+			return true
+		}
+		v.mu.Unlock()
 
 		if instCount > 0 {
 			usableH := h - 34
@@ -1482,12 +1803,42 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 
 	filteredIssues := v.getFilteredIssues()
 
+	// REST STATE: Click affordances
 	if st == window.StateRest {
-		return v.handleHover(pos)
+		if pos.Y <= b.Min.Y+14 {
+			v.StartDrag()
+			return true
+		}
+		if pos.Y >= b.Min.Y+h-28 {
+			v.OpenSettings()
+			return true
+		}
+		v.SetState(window.StateFan)
+		return true
 	}
 
 	// 1. Fan State Clicks
 	if st == window.StateFan {
+		if pos.Y <= b.Min.Y+12 {
+			v.StartDrag()
+			return true
+		}
+
+		// Clear search "✕" button
+		v.mu.Lock()
+		sq := v.searchQuery
+		v.mu.Unlock()
+		if sq != "" && pos.X >= b.Min.X+w-28 && pos.X <= b.Min.X+w-6 && pos.Y >= b.Min.Y+34 && pos.Y <= b.Min.Y+56 {
+			v.mu.Lock()
+			v.searchQuery = ""
+			v.searchActive = true
+			v.scrollY = 0
+			v.invalidateFilterCacheLocked()
+			v.mu.Unlock()
+			v.MarkNeedsLayout()
+			return true
+		}
+
 		// Click header to cycle instance filter
 		instHeaderRect := geometry.NewRect(b.Min.X+7, b.Min.Y+8, w-14, 22)
 		v.mu.Lock()
@@ -1550,6 +1901,17 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 	cardAreaWidth := w - tabBarWidth - 14
 
 	tabStartX := b.Min.X + w - tabBarWidth
+	cardStartX := b.Min.X + 8
+	if v.dockSide == window.DockSideLeft {
+		tabStartX = b.Min.X + 6
+		cardStartX = b.Min.X + tabBarWidth + 8
+	}
+
+	// Top shelf drag affordance
+	if pos.Y <= b.Min.Y+18 && pos.X >= tabStartX && pos.X <= tabStartX+tabBarWidth {
+		v.StartDrag()
+		return true
+	}
 
 	settingsTabRect := geometry.NewRect(tabStartX+2, b.Min.Y+h-48, tabBarWidth-14, 34)
 	if settingsTabRect.Contains(pos) {
@@ -1557,7 +1919,7 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		return true
 	}
 
-	tabMinY := b.Min.Y + float32(14)
+	tabMinY := b.Min.Y + float32(20)
 	tabMaxY := b.Min.Y + h - float32(56)
 	tabStartY := tabMinY - scrollY
 	tabHeight := float32(50)
@@ -1572,7 +1934,6 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		if tabRect.Contains(pos) {
 			for origIdx, oIss := range allIssues {
 				if oIss.Key == iss.Key {
-					// Toggle / collapse back if active tab is clicked again
 					if activeIdx == origIdx && !showSettings {
 						v.SetState(window.StateFan)
 						return true
@@ -1588,7 +1949,35 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 
 	// Settings Modal Clicks
 	if showSettings {
-		r := geometry.NewRect(b.Min.X+8, b.Min.Y+8, cardAreaWidth, h-16)
+		r := geometry.NewRect(cardStartX, b.Min.Y+8, cardAreaWidth, h-16)
+
+		// Top Controls
+		envRect := geometry.NewRect(r.Min.X+r.Width()-155, r.Min.Y+12, 75, 24)
+		if envRect.Contains(pos) {
+			v.mu.Lock()
+			cfg := v.config
+			loaded := jira.LoadFromDotEnv(&cfg)
+			if loaded {
+				v.config = cfg
+				v.loadInstanceFieldsLocked(v.selectedInstIdx)
+				v.statusMsg = "Credentials loaded from .env"
+				v.invalidateFilterCacheLocked()
+			}
+			v.mu.Unlock()
+			if loaded {
+				v.showToast("✓ Loaded credentials from .env")
+				v.MarkNeedsLayout()
+			} else {
+				v.showToast("No .env file found")
+			}
+			return true
+		}
+
+		closeRect := geometry.NewRect(r.Min.X+r.Width()-70, r.Min.Y+12, 50, 24)
+		if closeRect.Contains(pos) {
+			v.SetState(window.StateFan)
+			return true
+		}
 
 		// Instance Tabs Row Clicks
 		tabRowY := r.Min.Y + 44
@@ -1628,6 +2017,7 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 				Email:    v.emailVal,
 				APIToken: "",
 				JQLQuery: "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC",
+				Color:    "#38bdf8",
 			}
 			v.config.Instances = append(v.config.Instances, newInst)
 			v.loadInstanceFieldsLocked(len(v.config.Instances) - 1)
@@ -1638,32 +2028,81 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 			return true
 		}
 
-		// Load .env
-		envRect := geometry.NewRect(r.Min.X+r.Width()-155, r.Min.Y+12, 75, 24)
-		if envRect.Contains(pos) {
-			v.mu.Lock()
-			cfg := v.config
-			loaded := jira.LoadFromDotEnv(&cfg)
-			if loaded {
-				v.config = cfg
-				v.loadInstanceFieldsLocked(v.selectedInstIdx)
-				v.statusMsg = "Credentials loaded from .env"
-				v.invalidateFilterCacheLocked()
-			}
-			v.mu.Unlock()
-			if loaded {
-				v.showToast("✓ Loaded credentials from .env")
+		// Profile Accent Color Chips Clicks
+		labels := []string{
+			"Instance Label / Name",
+			"Jira Base URL (e.g. https://company.atlassian.net)",
+			"User Email",
+			"API Token (click to type or paste with ⌘V)",
+			"Custom JQL Query",
+		}
+		sepY := tabRowY + 34
+		startY := sepY + 12
+		colorRowY := startY + float32(len(labels)*45) + 2
+
+		for k, preset := range ProfilePresets {
+			chipCenter := geometry.Pt(r.Min.X+30+float32(k)*28, colorRowY+24)
+			dx := pos.X - chipCenter.X
+			dy := pos.Y - chipCenter.Y
+			if dx*dx+dy*dy <= 12*12 {
+				v.mu.Lock()
+				v.colorVal = preset.Hex
+				if v.selectedInstIdx < len(v.config.Instances) {
+					v.config.Instances[v.selectedInstIdx].Color = preset.Hex
+				}
+				v.mu.Unlock()
 				v.MarkNeedsLayout()
-			} else {
-				v.showToast("No .env file found")
+				if v.onRedraw != nil {
+					v.onRedraw()
+				}
+				return true
 			}
+		}
+
+		// Display & Docking Controls Clicks
+		dockSecY := colorRowY + 40
+		row1Y := dockSecY + 24
+
+		leftEdgeRect := geometry.NewRect(r.Min.X+20, row1Y, 95, 24)
+		if leftEdgeRect.Contains(pos) {
+			v.SetDockSide(window.DockSideLeft)
+			return true
+		}
+		rightEdgeRect := geometry.NewRect(r.Min.X+122, row1Y, 95, 24)
+		if rightEdgeRect.Contains(pos) {
+			v.SetDockSide(window.DockSideRight)
 			return true
 		}
 
-		// Close
-		closeRect := geometry.NewRect(r.Min.X+r.Width()-70, r.Min.Y+12, 50, 24)
-		if closeRect.Contains(pos) {
-			v.SetState(window.StateFan)
+		monStartX := r.Min.X + 228
+		v.mu.Lock()
+		mons := v.monitors
+		v.mu.Unlock()
+		for m, mon := range mons {
+			monRect := geometry.NewRect(monStartX+float32(m)*86, row1Y, 80, 24)
+			if monRect.Contains(pos) {
+				v.SetMonitor(mon.Index)
+				return true
+			}
+		}
+
+		// Row 2: Always On Top & Auto-Hide Mode
+		row2Y := dockSecY + 54
+		aotRect := geometry.NewRect(r.Min.X+20, row2Y, 135, 24)
+		if aotRect.Contains(pos) {
+			v.mu.Lock()
+			newAOT := !v.alwaysOnTop
+			v.mu.Unlock()
+			v.SetAlwaysOnTop(newAOT)
+			return true
+		}
+
+		ahRect := geometry.NewRect(r.Min.X+162, row2Y, 195, 24)
+		if ahRect.Contains(pos) {
+			v.mu.Lock()
+			newAH := !v.autoHide
+			v.mu.Unlock()
+			v.SetAutoHide(newAH)
 			return true
 		}
 
@@ -1725,8 +2164,6 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		}
 
 		// Field click focus
-		sepY := tabRowY + 34
-		startY := sepY + 12
 		for i := 0; i < 5; i++ {
 			y := startY + float32(i*45)
 			inpRect := geometry.NewRect(r.Min.X+20, y+16, r.Width()-40, 24)
@@ -1791,6 +2228,178 @@ func (v *AppView) handleKey(ev *event.KeyEvent) bool {
 	showSettings := v.showSettings
 	activeField := v.activeField
 	v.mu.Unlock()
+
+	mods := ev.Modifiers()
+	isCmdOrCtrl := mods.Has(event.ModSuper) || mods.Has(event.ModCtrl)
+	isShift := mods.Has(event.ModShift)
+
+	// Cmd+R / Ctrl+R: Refresh tickets immediately
+	if isCmdOrCtrl && (ev.Key == event.KeyR || ev.Rune == 'r' || ev.Rune == 'R') {
+		v.RefreshIssues()
+		v.showToast("Syncing Jira issues...")
+		return true
+	}
+
+	// Cmd+K / Cmd+F: Focus search
+	if isCmdOrCtrl && (ev.Key == event.KeyK || ev.Rune == 'k' || ev.Key == event.KeyF || ev.Rune == 'f') {
+		v.mu.Lock()
+		v.searchActive = true
+		v.mu.Unlock()
+		if st == window.StateRest {
+			v.SetState(window.StateFan)
+		} else {
+			v.MarkNeedsLayout()
+		}
+		return true
+	}
+
+	// Active ticket actions (when not editing settings)
+	if !showSettings && (st == window.StateFan || st == window.StateExpanded) {
+		filtered := v.getFilteredIssues()
+
+		// Arrow Up navigation
+		if ev.Key == event.KeyUp {
+			if len(filtered) > 0 {
+				v.mu.Lock()
+				curKey := ""
+				if v.activeIdx >= 0 && v.activeIdx < len(v.issues) {
+					curKey = v.issues[v.activeIdx].Key
+				}
+				curFIdx := 0
+				for fi, iss := range filtered {
+					if iss.Key == curKey {
+						curFIdx = fi
+						break
+					}
+				}
+				newFIdx := curFIdx - 1
+				if newFIdx < 0 {
+					newFIdx = len(filtered) - 1
+				}
+				newKey := filtered[newFIdx].Key
+				for origI, iss := range v.issues {
+					if iss.Key == newKey {
+						v.activeIdx = origI
+						v.activeTheme = GetTicketTheme(origI)
+						break
+					}
+				}
+				v.mu.Unlock()
+				if st == window.StateExpanded {
+					v.loadActiveTicketInMobileView()
+				}
+				v.MarkNeedsLayout()
+				if v.onRedraw != nil {
+					v.onRedraw()
+				}
+				return true
+			}
+		}
+
+		// Arrow Down navigation
+		if ev.Key == event.KeyDown {
+			if len(filtered) > 0 {
+				v.mu.Lock()
+				curKey := ""
+				if v.activeIdx >= 0 && v.activeIdx < len(v.issues) {
+					curKey = v.issues[v.activeIdx].Key
+				}
+				curFIdx := 0
+				for fi, iss := range filtered {
+					if iss.Key == curKey {
+						curFIdx = fi
+						break
+					}
+				}
+				newFIdx := (curFIdx + 1) % len(filtered)
+				newKey := filtered[newFIdx].Key
+				for origI, iss := range v.issues {
+					if iss.Key == newKey {
+						v.activeIdx = origI
+						v.activeTheme = GetTicketTheme(origI)
+						break
+					}
+				}
+				v.mu.Unlock()
+				if st == window.StateExpanded {
+					v.loadActiveTicketInMobileView()
+				}
+				v.MarkNeedsLayout()
+				if v.onRedraw != nil {
+					v.onRedraw()
+				}
+				return true
+			}
+		}
+
+		// Cmd+O: Open active ticket in browser
+		if isCmdOrCtrl && (ev.Key == event.KeyO || ev.Rune == 'o' || ev.Rune == 'O') {
+			v.mu.Lock()
+			var targetURL string
+			if v.activeIdx >= 0 && v.activeIdx < len(v.issues) {
+				iss := v.issues[v.activeIdx]
+				baseURL := iss.BaseURL
+				if baseURL == "" {
+					baseURL = v.config.BaseURL
+				}
+				targetURL = fmt.Sprintf("%s/browse/%s", strings.TrimRight(baseURL, "/"), iss.Key)
+			}
+			v.mu.Unlock()
+			if targetURL != "" {
+				if window.DefaultManager != nil {
+					_ = window.DefaultManager.OpenTicketURL(targetURL)
+				}
+				v.showToast("Opening ticket in browser")
+				return true
+			}
+		}
+
+		// Cmd+Shift+C: Copy Git branch name
+		if isCmdOrCtrl && isShift && (ev.Key == event.KeyC || ev.Rune == 'c' || ev.Rune == 'C') {
+			v.mu.Lock()
+			var branchName string
+			if v.activeIdx >= 0 && v.activeIdx < len(v.issues) {
+				iss := v.issues[v.activeIdx]
+				prefix := v.config.BranchPrefix
+				if prefix == "" {
+					prefix = "feature/"
+				}
+				slug := strings.ToLower(iss.Summary)
+				slug = strings.Map(func(r rune) rune {
+					if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+						return r
+					}
+					return '-'
+				}, slug)
+				slug = strings.Trim(slug, "-")
+				if len(slug) > 30 {
+					slug = slug[:30]
+				}
+				branchName = fmt.Sprintf("%s%s-%s", prefix, iss.Key, slug)
+			}
+			v.mu.Unlock()
+			if branchName != "" {
+				copyToClipboard(branchName)
+				v.showToast("✓ Copied branch: " + branchName)
+				return true
+			}
+		}
+
+		// Cmd+C: Copy active ticket Key
+		if isCmdOrCtrl && !isShift && (ev.Key == event.KeyC || ev.Rune == 'c' || ev.Rune == 'C') {
+			v.mu.Lock()
+			var keyToCopy string
+			if v.activeIdx >= 0 && v.activeIdx < len(v.issues) {
+				keyToCopy = v.issues[v.activeIdx].Key
+			}
+			v.mu.Unlock()
+			if keyToCopy != "" {
+				copyToClipboard(keyToCopy)
+				v.showToast("✓ Copied key: " + keyToCopy)
+				return true
+			}
+		}
+	}
 
 	// Handle Instant Search in Fan state (Modifier key guard: ignore modified keystrokes)
 	if st == window.StateFan && !showSettings {
@@ -2075,12 +2684,12 @@ func maskToken(token string) string {
 }
 
 func copyToClipboard(text string) {
+	if runtime.GOOS == "darwin" {
+		window.NativeCopyText(text)
+		return
+	}
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("pbcopy")
-		cmd.Stdin = strings.NewReader(text)
-		_ = cmd.Run()
 	case "windows":
 		cmd = exec.Command("clip")
 		cmd.Stdin = strings.NewReader(text)
@@ -2093,10 +2702,13 @@ func copyToClipboard(text string) {
 }
 
 func pasteFromClipboard() string {
+	if runtime.GOOS == "darwin" {
+		if text, ok := window.NativePasteText(); ok {
+			return text
+		}
+	}
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("pbpaste")
 	case "windows":
 		cmd = exec.Command("powershell", "-NoProfile", "-Command", "Get-Clipboard")
 	case "linux":
@@ -2110,3 +2722,4 @@ func pasteFromClipboard() string {
 	}
 	return strings.TrimRight(string(out), "\r\n")
 }
+
