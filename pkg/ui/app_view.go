@@ -445,22 +445,31 @@ func (v *AppView) saveCurrentInstanceFieldsLocked() {
 }
 
 func isIssueForInstance(iss jira.Issue, inst jira.InstanceConfig, instIdx int) bool {
-	if inst.ID != "" && iss.InstanceID == inst.ID {
-		return true
+	// If both have an instance ID, it is the authoritative unique identifier.
+	// Never fall back to BaseURL or Name when InstanceID is present, otherwise
+	// multiple instances sharing the same BaseURL (e.g. different JQL queries)
+	// will mistakenly cross-match and share counts.
+	if inst.ID != "" && iss.InstanceID != "" {
+		return iss.InstanceID == inst.ID
 	}
-	if inst.BaseURL != "" && iss.BaseURL != "" {
-		if strings.EqualFold(strings.TrimRight(inst.BaseURL, "/"), strings.TrimRight(iss.BaseURL, "/")) {
+
+	// Fallback for mock or legacy issues without an InstanceID:
+	if iss.InstanceID == "" {
+		if inst.BaseURL != "" && iss.BaseURL != "" {
+			if strings.EqualFold(strings.TrimRight(inst.BaseURL, "/"), strings.TrimRight(iss.BaseURL, "/")) {
+				return true
+			}
+		}
+		if inst.Name != "" && iss.InstanceName != "" {
+			if strings.EqualFold(inst.Name, iss.InstanceName) {
+				return true
+			}
+		}
+		if instIdx == 0 {
 			return true
 		}
 	}
-	if inst.Name != "" && iss.InstanceName != "" {
-		if strings.EqualFold(inst.Name, iss.InstanceName) {
-			return true
-		}
-	}
-	if iss.InstanceID == "" && iss.InstanceName == "" && instIdx == 0 {
-		return true
-	}
+
 	return false
 }
 

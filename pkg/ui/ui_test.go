@@ -1397,3 +1397,58 @@ func TestStatusUTF8RuneSlicing(t *testing.T) {
 		t.Errorf("expected truncated UTF-8 status %q in Expanded state, not found", expectedShort)
 	}
 }
+
+func TestIsIssueForInstanceIsolation(t *testing.T) {
+	// Scenario from user bug report:
+	// Two instances pointing to the same Jira Cloud host (e.g. https://avono.atlassian.net)
+	// but with different JQL queries and IDs ("inst-3" and "inst-4").
+	inst3 := jira.InstanceConfig{
+		ID:      "inst-3",
+		Name:    "Project Alpha",
+		BaseURL: "https://avono.atlassian.net",
+	}
+	inst4 := jira.InstanceConfig{
+		ID:      "inst-4",
+		Name:    "Project Beta",
+		BaseURL: "https://avono.atlassian.net",
+	}
+
+	issueForInst3 := jira.Issue{
+		InstanceID:   "inst-3",
+		InstanceName: "Project Alpha",
+		BaseURL:      "https://avono.atlassian.net",
+		Key:          "ALPHA-1",
+	}
+	issueForInst4 := jira.Issue{
+		InstanceID:   "inst-4",
+		InstanceName: "Project Beta",
+		BaseURL:      "https://avono.atlassian.net",
+		Key:          "BETA-1",
+	}
+
+	// issueForInst3 must match inst3, NOT inst4
+	if !isIssueForInstance(issueForInst3, inst3, 2) {
+		t.Errorf("expected issueForInst3 to match inst3")
+	}
+	if isIssueForInstance(issueForInst3, inst4, 3) {
+		t.Errorf("issueForInst3 MUST NOT match inst4 despite identical BaseURL")
+	}
+
+	// issueForInst4 must match inst4, NOT inst3
+	if !isIssueForInstance(issueForInst4, inst4, 3) {
+		t.Errorf("expected issueForInst4 to match inst4")
+	}
+	if isIssueForInstance(issueForInst4, inst3, 2) {
+		t.Errorf("issueForInst4 MUST NOT match inst3 despite identical BaseURL")
+	}
+
+	// Mock issues (no InstanceID) should only match primary instance (instIdx == 0)
+	mockIss := jira.Issue{Key: "MOCK-1"}
+	if !isIssueForInstance(mockIss, inst3, 0) {
+		t.Errorf("mock issue should match when instIdx == 0")
+	}
+	if isIssueForInstance(mockIss, inst4, 1) {
+		t.Errorf("mock issue should not match when instIdx > 0")
+	}
+}
+

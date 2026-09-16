@@ -1,6 +1,7 @@
 package jira
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -73,7 +74,11 @@ func (c *Config) EnsureInstances() {
 				JQLQuery: c.JQLQuery,
 			},
 		}
-		c.ActiveInstID = "inst-1"
+	}
+	for i := range c.Instances {
+		if c.Instances[i].ID == "" {
+			c.Instances[i].ID = fmt.Sprintf("inst-%d", i+1)
+		}
 	}
 	if c.ActiveInstID == "" && len(c.Instances) > 0 {
 		c.ActiveInstID = c.Instances[0].ID
