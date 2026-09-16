@@ -207,6 +207,10 @@ func TestManagerSetToolTip(t *testing.T) {
 	// Also verify package-level helper does not panic when DefaultManager is nil or set
 	orig := DefaultManager
 	defer func() { DefaultManager = orig }()
+	if orig != nil {
+		orig.SetToolTip("test platform tooltip")
+		orig.SetToolTip("")
+	}
 	DefaultManager = nil
 	SetToolTip("SHOULD_NOT_PANIC")
 	DefaultManager = mgr

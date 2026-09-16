@@ -550,13 +550,13 @@ static char *DarwinPasteText(void) {
 }
 
 static void DarwinSetToolTip(const char *text) {
+    NSString *tip = (text && strlen(text) > 0) ? [NSString stringWithUTF8String:text] : nil;
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!g_appWindow) return;
         NSView *cv = [g_appWindow contentView];
         if (!cv) return;
         [cv removeAllToolTips];
-        if (text && strlen(text) > 0) {
-            NSString *tip = [NSString stringWithUTF8String:text];
+        if (tip) {
             [cv setToolTip:tip];
         }
     });
