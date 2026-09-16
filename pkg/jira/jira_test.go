@@ -763,6 +763,55 @@ func TestRealUserConfigNeverModifiedByTests(t *testing.T) {
 	}
 }
 
+func TestConfigBackupAndAutoRecovery(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "jira-backup-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	cfgPath := filepath.Join(tempDir, "config.json")
+	SetConfigFilePathForTesting(cfgPath)
+	defer ResetConfigFilePathForTesting()
+
+	cfg1 := DefaultConfig()
+	cfg1.BaseURL = "https://initial.jira.com"
+	if err := SaveConfig(cfg1); err != nil {
+		t.Fatalf("first SaveConfig failed: %v", err)
+	}
+
+	// Verify initial config
+	if _, err := os.Stat(cfgPath); err != nil {
+		t.Fatalf("config.json not created")
+	}
+
+	// Save a second version -> this should create config.json.bak with initial content
+	cfg2 := cfg1
+	cfg2.BaseURL = "https://updated.jira.com"
+	if err := SaveConfig(cfg2); err != nil {
+		t.Fatalf("second SaveConfig failed: %v", err)
+	}
+
+	bakPath := cfgPath + ".bak"
+	bakData, err := os.ReadFile(bakPath)
+	if err != nil {
+		t.Fatalf("expected config.json.bak to exist: %v", err)
+	}
+	if !strings.Contains(string(bakData), "https://initial.jira.com") {
+		t.Errorf("expected backup to contain initial URL, got %s", string(bakData))
+	}
+
+	// Delete config.json, verify LoadConfig recovers from config.json.bak
+	if err := os.Remove(cfgPath); err != nil {
+		t.Fatalf("failed to remove config.json: %v", err)
+	}
+
+	recovered := LoadConfig()
+	if recovered.BaseURL != "https://initial.jira.com" {
+		t.Errorf("expected recovered BaseURL to be 'https://initial.jira.com', got %q", recovered.BaseURL)
+	}
+}
+
 // Tier 3: Concurrency Race Tests with Parallel Operations
 func TestClientConcurrencyRaceValidation(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

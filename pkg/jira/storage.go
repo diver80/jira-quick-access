@@ -5,10 +5,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 var (
@@ -31,7 +34,14 @@ func ResetConfigFilePathForTesting() {
 }
 
 func isRunningInTest() bool {
-	return flag.Lookup("test.v") != nil
+	if flag.Lookup("test.v") != nil {
+		return true
+	}
+	execName := filepath.Base(os.Args[0])
+	if strings.HasSuffix(execName, ".test") || strings.Contains(execName, "test") || strings.Contains(os.Args[0], "/_test/") {
+		return true
+	}
+	return false
 }
 
 func getConfigFilePath() string {
@@ -118,6 +128,10 @@ func LoadConfig() Config {
 	filePath := getConfigFilePath()
 
 	data, err := os.ReadFile(filePath)
+	if err != nil {
+		// Attempt fallback to .bak if primary config is missing
+		data, err = os.ReadFile(filePath + ".bak")
+	}
 	if err == nil {
 		var saved Config
 		if err := json.Unmarshal(data, &saved); err == nil {
@@ -183,13 +197,60 @@ func LoadConfig() Config {
 	return cfg
 }
 
-// SaveConfig writes the configuration to disk.
+// SaveConfig writes the configuration to disk atomically and creates safety backups.
 func SaveConfig(cfg Config) error {
 	cfg.EnsureInstances()
 	filePath := getConfigFilePath()
+	dir := filepath.Dir(filePath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filePath, data, 0600)
+
+	// 1. Safety Backup: If filePath already exists with non-empty content, back it up
+	if existing, err := os.ReadFile(filePath); err == nil && len(existing) > 0 {
+		_ = os.WriteFile(filePath+".bak", existing, 0600)
+
+		// Create timestamped history backup (retaining last 10 revisions)
+		if !isRunningInTest() {
+			backupDir := filepath.Join(dir, "backups")
+			if err := os.MkdirAll(backupDir, 0755); err == nil {
+				timestamp := time.Now().Format("20060102-150405")
+				backupFile := filepath.Join(backupDir, fmt.Sprintf("config-%s.json", timestamp))
+				_ = os.WriteFile(backupFile, existing, 0600)
+				pruneOldBackups(backupDir, 10)
+			}
+		}
+	}
+
+	// 2. Atomic write: write to temp file first, then atomically rename
+	tmpPath := filePath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, filePath)
+}
+
+func pruneOldBackups(dir string, maxBackups int) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	var backupFiles []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasPrefix(entry.Name(), "config-") && strings.HasSuffix(entry.Name(), ".json") {
+			backupFiles = append(backupFiles, filepath.Join(dir, entry.Name()))
+		}
+	}
+	sort.Strings(backupFiles)
+	if len(backupFiles) > maxBackups {
+		toDelete := backupFiles[:len(backupFiles)-maxBackups]
+		for _, f := range toDelete {
+			_ = os.Remove(f)
+		}
+	}
 }
