@@ -571,9 +571,9 @@ func (v *AppView) computeSize(st window.WindowState) (int, int) {
 		if issueCount == 0 {
 			issueCount = 2
 		}
-		h := issueCount*58 + 120
-		if h > 680 {
-			h = 680
+		h := issueCount*70 + 120
+		if h > 720 {
+			h = 720
 		}
 		if h < 270 {
 			h = 270

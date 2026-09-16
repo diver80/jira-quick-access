@@ -1093,4 +1093,34 @@ func TestTruncateSummary(t *testing.T) {
 	}
 }
 
+func TestComputeSizeFanHeight(t *testing.T) {
+	v := NewAppView(jira.DefaultConfig(), nil, nil)
+	defer v.Close()
+	// 0 issues -> min height 270
+	w, h := v.computeSize(window.StateFan)
+	if w != 120 || h != 270 {
+		t.Errorf("computeSize(StateFan) with 0 issues = (%d, %d), want (120, 270)", w, h)
+	}
+
+	// 5 issues -> 5*70 + 120 = 470
+	v.issues = make([]jira.Issue, 5)
+	for i := range v.issues {
+		v.issues[i] = jira.Issue{Key: fmt.Sprintf("KEY-%d", i), Summary: "Test issue"}
+	}
+	v.cacheDirty = true
+	w, h = v.computeSize(window.StateFan)
+	if w != 120 || h != 470 {
+		t.Errorf("computeSize(StateFan) with 5 issues = (%d, %d), want (120, 470)", w, h)
+	}
+
+	// 15 issues -> clamped at 720
+	v.issues = make([]jira.Issue, 15)
+	v.cacheDirty = true
+	_, h = v.computeSize(window.StateFan)
+	if h != 720 {
+		t.Errorf("computeSize(StateFan) with 15 issues = h %d, want 720", h)
+	}
+}
+
+
 
