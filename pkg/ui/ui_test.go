@@ -1250,6 +1250,7 @@ func TestHoverTooltipLifecycle(t *testing.T) {
 	window.DefaultManager = mgr
 
 	v := NewAppView(jira.DefaultConfig(), nil, nil)
+	defer v.Close()
 	v.issues = []jira.Issue{
 		{Key: "PROJ-1", Summary: "Build rocket", Status: jira.Status{Name: "To Do"}},
 	}
@@ -1266,5 +1267,22 @@ func TestHoverTooltipLifecycle(t *testing.T) {
 	v.setHoveredTab(-1)
 	if mgr.tooltip != "" {
 		t.Errorf("expected tooltip to be cleared, got %q", mgr.tooltip)
+	}
+
+	// Re-hover then transition state away from StateFan
+	v.setHoveredTab(0)
+	if mgr.tooltip != "[PROJ-1] Build rocket • To Do" {
+		t.Errorf("expected tooltip on hover, got %q", mgr.tooltip)
+	}
+	v.SetState(window.StateRest)
+	if mgr.tooltip != "" {
+		t.Errorf("expected tooltip to be cleared on SetState(StateRest), got %q", mgr.tooltip)
+	}
+
+	v.SetState(window.StateFan)
+	v.setHoveredTab(0)
+	v.SetState(window.StateExpanded)
+	if mgr.tooltip != "" {
+		t.Errorf("expected tooltip to be cleared on SetState(StateExpanded), got %q", mgr.tooltip)
 	}
 }

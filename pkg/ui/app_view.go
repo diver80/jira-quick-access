@@ -620,7 +620,7 @@ func (v *AppView) SetState(newState window.WindowState) {
 	showSettings := v.showSettings
 	v.mu.Unlock()
 
-	if newState == window.StateRest {
+	if newState != window.StateFan {
 		window.SetToolTip("")
 	}
 
