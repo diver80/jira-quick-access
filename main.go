@@ -57,6 +57,10 @@ func main() {
 			gogpuApp.RequestRedraw()
 		},
 	)
+	rootView.SetOnResize(func(w, h int) {
+		uiApp.Window().HandleResize(w, h)
+		gogpuApp.RequestRedraw()
+	})
 	defer rootView.Close()
 
 	// Initial issue fetch

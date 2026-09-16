@@ -82,6 +82,7 @@ type AppView struct {
 
 	// Callbacks
 	onRedraw func()
+	onResize func(w, h int)
 }
 
 type appViewStateSnapshot struct {
@@ -315,6 +316,25 @@ func (v *AppView) Close() {
 	}
 	v.mu.Unlock()
 	v.wg.Wait()
+}
+
+// SetOnResize registers a callback to notify when the window/view changes dimensions.
+func (v *AppView) SetOnResize(fn func(w, h int)) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.onResize = fn
+}
+
+// SetBounds overrides widget.WidgetBase.SetBounds to enforce that bounds always match
+// the authoritative size for the current WindowState, preventing external layout
+// engines from overwriting the HUD dimensions with stale constraints.
+func (v *AppView) SetBounds(r geometry.Rect) {
+	v.mu.Lock()
+	st := v.state
+	v.mu.Unlock()
+
+	expectedW, expectedH := v.computeSize(st)
+	v.WidgetBase.SetBounds(geometry.NewRect(r.Min.X, r.Min.Y, float32(expectedW), float32(expectedH)))
 }
 
 // SetDockSide sets docking edge and smoothly repositions the window
@@ -645,6 +665,13 @@ func (v *AppView) SetState(newState window.WindowState) {
 		window.DefaultManager.SetState(newState, w, h)
 	}
 
+	v.mu.Lock()
+	onResize := v.onResize
+	v.mu.Unlock()
+	if onResize != nil {
+		onResize(w, h)
+	}
+
 	if newState == window.StateExpanded && !showSettings {
 		window.SetMobileWebViewVisible(true, w, h)
 		v.loadActiveTicketInMobileView()
@@ -893,15 +920,10 @@ func truncateSummary(text string, maxLen int) string {
 
 func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	s := v.snapshot()
-	b := s.bounds
-	w := b.Width()
-	h := b.Height()
-	if w <= 0 {
-		w = 32
-	}
-	if h <= 0 {
-		h = 224
-	}
+	expectedW, expectedH := v.computeSize(s.state)
+	w := float32(expectedW)
+	h := float32(expectedH)
+	b := geometry.NewRect(s.bounds.Min.X, s.bounds.Min.Y, w, h)
 
 	// =========================================================================
 	// 1. STATE REST: macOS Dock Glass Capsule with Complete Crisp White Border
@@ -1758,11 +1780,13 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 	v.mu.Lock()
 	st := v.state
 	instCount := len(v.config.Instances)
-	b := v.Bounds()
-	h := b.Height()
-	w := b.Width()
 	scrollY := v.scrollY
 	v.mu.Unlock()
+
+	expW, expH := v.computeSize(st)
+	w := float32(expW)
+	h := float32(expH)
+	b := geometry.NewRect(0, 0, w, h)
 
 	// REST STATE: Hovering specific instance or settings dot
 	if st == window.StateRest {
@@ -1937,10 +1961,6 @@ func (v *AppView) getActiveTargetLocked() *string {
 }
 
 func (v *AppView) handleClick(pos geometry.Point) bool {
-	b := v.Bounds()
-	w := b.Width()
-	h := b.Height()
-
 	v.mu.Lock()
 	st := v.state
 	allIssues := v.issues
@@ -1948,6 +1968,11 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 	scrollY := v.scrollY
 	activeIdx := v.activeIdx
 	v.mu.Unlock()
+
+	expW, expH := v.computeSize(st)
+	w := float32(expW)
+	h := float32(expH)
+	b := geometry.NewRect(0, 0, w, h)
 
 	filteredIssues := v.getFilteredIssues()
 
