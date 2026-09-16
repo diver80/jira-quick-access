@@ -620,7 +620,7 @@ func (v *AppView) SetState(newState window.WindowState) {
 	showSettings := v.showSettings
 	v.mu.Unlock()
 
-	if newState != window.StateFan {
+	if newState == window.StateRest {
 		window.SetToolTip("")
 	}
 
@@ -1169,8 +1169,9 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 
 				// Line 3: Tab Status (8pt regular)
 				shortStatus := iss.Status.Name
-				if len(shortStatus) > 13 {
-					shortStatus = shortStatus[:13]
+				statusRunes := []rune(iss.Status.Name)
+				if len(statusRunes) > 13 {
+					shortStatus = string(statusRunes[:13])
 				}
 				statusRect := geometry.NewRect(tabX+2, tabY+41, tabW-4, 14)
 				secColor := tabTheme.Secondary
@@ -1267,6 +1268,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 
 		tabTheme := GetTicketTheme(i)
 		isActive := (iss.Key == activeKey && !s.showSettings)
+		isHovered := (i == s.hoveredTabIdx)
 		tabWidth := tabBarWidth - 14
 		tabX := tabStartX + 2
 		if isActive {
@@ -1284,6 +1286,8 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				pillX = tabX + 2
 			}
 			canvas.DrawRoundRect(geometry.NewRect(pillX, tabY+8, 3, tabHeight-16), tabTheme.Foreground, 1.5)
+		} else if isHovered {
+			canvas.StrokeRoundRect(tabRect, widget.RGBA8(255, 255, 255, 200), 8, 1.2)
 		} else {
 			canvas.StrokeRoundRect(tabRect, tabTheme.Border, 8, 1.0)
 		}
@@ -1296,19 +1300,20 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		summaryText := truncateSummary(iss.Summary, 17)
 		summaryRect := geometry.NewRect(tabX+3, tabY+23, tabWidth-6, 15)
 		summaryColor := tabTheme.Secondary
-		if isActive {
+		if isActive || isHovered {
 			summaryColor = widget.RGBA8(255, 255, 255, 255)
 		}
-		canvas.DrawText(summaryText, summaryRect, 9, summaryColor, isActive, widget.TextAlignCenter)
+		canvas.DrawText(summaryText, summaryRect, 9, summaryColor, isActive || isHovered, widget.TextAlignCenter)
 
 		// Line 3: Tab Status (8pt regular)
 		shortStatus := iss.Status.Name
-		if len(shortStatus) > 13 {
-			shortStatus = shortStatus[:13]
+		statusRunes := []rune(iss.Status.Name)
+		if len(statusRunes) > 13 {
+			shortStatus = string(statusRunes[:13])
 		}
 		statusRect := geometry.NewRect(tabX+2, tabY+43, tabWidth-4, 14)
 		secColor := tabTheme.Secondary
-		if isActive {
+		if isActive || isHovered {
 			secColor = widget.RGBA8(255, 255, 255, 255)
 		}
 		canvas.DrawText(shortStatus, statusRect, 8, secColor, false, widget.TextAlignCenter)
@@ -1845,6 +1850,61 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 				v.onRedraw()
 			}
 		}
+		return true
+	}
+
+	// EXPANDED STATE: Track hovered tab on the side dock shelf
+	if st == window.StateExpanded {
+		v.mu.Lock()
+		prevHoverTab := v.hoveredTabIdx
+		prevHoverSet := v.hoveredSettings
+		dockSide := v.dockSide
+		v.mu.Unlock()
+
+		newHoverTab := -1
+		newHoverSet := false
+
+		tabBarWidth := float32(110)
+		tabStartX := b.Min.X + w - tabBarWidth
+		if dockSide == window.DockSideLeft {
+			tabStartX = b.Min.X + 6
+		}
+
+		settingsTabRect := geometry.NewRect(tabStartX+2, b.Min.Y+h-48, tabBarWidth-14, 34)
+		if settingsTabRect.Contains(pos) {
+			newHoverSet = true
+		} else {
+			filtered := v.getFilteredIssues()
+			tabMinY := b.Min.Y + float32(20)
+			tabMaxY := b.Min.Y + h - float32(56)
+			tabStartY := tabMinY - scrollY
+			tabHeight := float32(64)
+			tabGap := float32(7)
+
+			for i := range filtered {
+				tabY := tabStartY + float32(i)*(tabHeight+tabGap)
+				if tabY < tabMinY-2 || tabY+tabHeight > tabMaxY+2 {
+					continue
+				}
+				tabRect := geometry.NewRect(tabStartX, tabY, tabBarWidth-4, tabHeight)
+				if tabRect.Contains(pos) {
+					newHoverTab = i
+					break
+				}
+			}
+		}
+
+		if newHoverTab != prevHoverTab || newHoverSet != prevHoverSet {
+			v.mu.Lock()
+			v.hoveredSettings = newHoverSet
+			v.mu.Unlock()
+			v.setHoveredTab(newHoverTab)
+			v.MarkNeedsLayout()
+			if v.onRedraw != nil {
+				v.onRedraw()
+			}
+		}
+		return true
 	}
 
 	return false

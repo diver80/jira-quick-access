@@ -27,6 +27,7 @@ type testDrawTextCall struct {
 }
 
 type testMockCanvas struct {
+	mu        sync.Mutex
 	drawTexts []testDrawTextCall
 }
 
@@ -44,6 +45,8 @@ func (m *testMockCanvas) StrokeArc(center geometry.Point, radius float32, startA
 }
 func (m *testMockCanvas) DrawLine(from, to geometry.Point, color widget.Color, strokeWidth float32) {}
 func (m *testMockCanvas) DrawText(text string, bounds geometry.Rect, fontSize float32, color widget.Color, bold bool, align widget.TextAlign) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.drawTexts = append(m.drawTexts, testDrawTextCall{
 		text:     text,
 		bounds:   bounds,
@@ -52,6 +55,13 @@ func (m *testMockCanvas) DrawText(text string, bounds geometry.Rect, fontSize fl
 		bold:     bold,
 		align:    align,
 	})
+}
+func (m *testMockCanvas) getDrawTexts() []testDrawTextCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	res := make([]testDrawTextCall, len(m.drawTexts))
+	copy(res, m.drawTexts)
+	return res
 }
 func (m *testMockCanvas) MeasureText(text string, fontSize float32, bold bool) float32 {
 	return float32(len(text)) * fontSize * 0.6
@@ -1164,7 +1174,7 @@ func TestDrawTabThreeLines(t *testing.T) {
 	// 2. "Fix race conditi…"
 	// 3. "In Progress"
 	var foundKey, foundSummary, foundStatus bool
-	for _, dt := range mockC.drawTexts {
+	for _, dt := range mockC.getDrawTexts() {
 		if dt.text == "PROJ-101" {
 			foundKey = true
 		}
@@ -1193,7 +1203,7 @@ func TestDrawTabThreeLines(t *testing.T) {
 	v.Draw(ctx, mockCExp)
 
 	var foundExpKey, foundExpSummary, foundExpStatus bool
-	for _, dt := range mockCExp.drawTexts {
+	for _, dt := range mockCExp.getDrawTexts() {
 		if dt.text == "PROJ-101" {
 			foundExpKey = true
 		}
@@ -1269,7 +1279,7 @@ func TestHoverTooltipLifecycle(t *testing.T) {
 		t.Errorf("expected tooltip to be cleared, got %q", mgr.tooltip)
 	}
 
-	// Re-hover then transition state away from StateFan
+	// Re-hover then transition to StateRest
 	v.setHoveredTab(0)
 	if mgr.tooltip != "[PROJ-1] Build rocket • To Do" {
 		t.Errorf("expected tooltip on hover, got %q", mgr.tooltip)
@@ -1279,10 +1289,111 @@ func TestHoverTooltipLifecycle(t *testing.T) {
 		t.Errorf("expected tooltip to be cleared on SetState(StateRest), got %q", mgr.tooltip)
 	}
 
+	// Re-hover in StateFan then transition to StateExpanded: tooltip should remain active
 	v.SetState(window.StateFan)
 	v.setHoveredTab(0)
 	v.SetState(window.StateExpanded)
+	if mgr.tooltip != "[PROJ-1] Build rocket • To Do" {
+		t.Errorf("expected tooltip to remain in StateExpanded, got %q", mgr.tooltip)
+	}
+	v.SetState(window.StateRest)
 	if mgr.tooltip != "" {
-		t.Errorf("expected tooltip to be cleared on SetState(StateExpanded), got %q", mgr.tooltip)
+		t.Errorf("expected tooltip to be cleared on SetState(StateRest), got %q", mgr.tooltip)
+	}
+}
+
+func TestHoverExpandedTab(t *testing.T) {
+	mgr := &mockManager{}
+	orig := window.DefaultManager
+	defer func() { window.DefaultManager = orig }()
+	window.DefaultManager = mgr
+
+	v := NewAppView(jira.DefaultConfig(), nil, nil)
+	defer v.Close()
+	v.issues = []jira.Issue{
+		{Key: "PROJ-1", Summary: "Ship rocket", Status: jira.Status{Name: "In Review"}},
+	}
+	v.cacheDirty = true
+	v.SetState(window.StateExpanded)
+	v.SetBounds(geometry.NewRect(0, 0, 780, 580))
+
+	// In StateExpanded with DockSideRight (default), tabs are on the right side:
+	// tabBarWidth = 110, tabStartX = 780 - 110 = 670, tabStartY = 20, tabHeight = 64
+	// Point at x=700, y=40 is inside the first tab.
+	v.handleHover(geometry.Pt(700, 40))
+
+	v.mu.Lock()
+	hovIdx := v.hoveredTabIdx
+	v.mu.Unlock()
+
+	if hovIdx != 0 {
+		t.Errorf("expected hoveredTabIdx=0 in StateExpanded, got %d", hovIdx)
+	}
+	if mgr.tooltip != "[PROJ-1] Ship rocket • In Review" {
+		t.Errorf("expected tooltip for hovered tab in StateExpanded, got %q", mgr.tooltip)
+	}
+
+	// Transition to StateRest should reset hoveredTabIdx to -1 and clear tooltip
+	v.SetState(window.StateRest)
+	v.mu.Lock()
+	hovIdxAfterRest := v.hoveredTabIdx
+	v.mu.Unlock()
+
+	if hovIdxAfterRest != -1 {
+		t.Errorf("expected hoveredTabIdx=-1 after SetState(StateRest), got %d", hovIdxAfterRest)
+	}
+	if mgr.tooltip != "" {
+		t.Errorf("expected tooltip to be cleared after SetState(StateRest), got %q", mgr.tooltip)
+	}
+}
+
+func TestStatusUTF8RuneSlicing(t *testing.T) {
+	v := NewAppView(jira.DefaultConfig(), nil, nil)
+	defer v.Close()
+
+	// 18-rune UTF-8 status with multi-byte characters
+	statusName := "In Bearbeitung üöä"
+	v.issues = []jira.Issue{
+		{
+			Key:     "UTF-1",
+			Summary: "Test UTF-8",
+			Status:  jira.Status{Name: statusName},
+		},
+	}
+	v.cacheDirty = true
+	v.state = window.StateFan
+	v.SetBounds(geometry.NewRect(0, 0, 120, 300))
+
+	ctx := &testContext{}
+	mockC := &testMockCanvas{}
+	v.Draw(ctx, mockC)
+
+	expectedShort := string([]rune(statusName)[:13])
+	var foundFanStatus bool
+	for _, dt := range mockC.getDrawTexts() {
+		if dt.text == expectedShort {
+			foundFanStatus = true
+			break
+		}
+	}
+	if !foundFanStatus {
+		t.Errorf("expected truncated UTF-8 status %q in Fan state, not found", expectedShort)
+	}
+
+	// Also test Expanded state
+	v.state = window.StateExpanded
+	v.SetBounds(geometry.NewRect(0, 0, 780, 580))
+	mockCExp := &testMockCanvas{}
+	v.Draw(ctx, mockCExp)
+
+	var foundExpStatus bool
+	for _, dt := range mockCExp.getDrawTexts() {
+		if dt.text == expectedShort {
+			foundExpStatus = true
+			break
+		}
+	}
+	if !foundExpStatus {
+		t.Errorf("expected truncated UTF-8 status %q in Expanded state, not found", expectedShort)
 	}
 }
