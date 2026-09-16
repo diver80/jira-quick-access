@@ -1084,7 +1084,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		tabMinY := b.Min.Y + float32(60)
 		tabMaxY := b.Min.Y + h - float32(50)
 		tabStartY := tabMinY - s.scrollY
-		tabHeight := float32(48)
+		tabHeight := float32(62)
 		tabGap := float32(6)
 
 		canvas.PushClip(geometry.NewRect(b.Min.X+1, tabMinY, w-2, tabMaxY-tabMinY))
@@ -1130,21 +1130,30 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 					canvas.StrokeRoundRect(tabRect, tabTheme.Border, 8, 1.0)
 				}
 
-				// Tab Key
-				keyRect := geometry.NewRect(tabX+2, tabY+6, tabW-4, 15)
+				// Line 1: Tab Key (11pt bold)
+				keyRect := geometry.NewRect(tabX+2, tabY+5, tabW-4, 15)
 				canvas.DrawText(iss.Key, keyRect, 11, tabTheme.Foreground, true, widget.TextAlignCenter)
 
-				// Tab Status
+				// Line 2: Tab Summary (9pt regular, truncated)
+				summaryText := truncateSummary(iss.Summary, 17)
+				summaryRect := geometry.NewRect(tabX+3, tabY+22, tabW-6, 15)
+				summaryColor := tabTheme.Secondary
+				if isHovered {
+					summaryColor = widget.RGBA8(255, 255, 255, 255)
+				}
+				canvas.DrawText(summaryText, summaryRect, 9, summaryColor, isHovered, widget.TextAlignCenter)
+
+				// Line 3: Tab Status (8pt regular)
 				shortStatus := iss.Status.Name
 				if len(shortStatus) > 13 {
 					shortStatus = shortStatus[:13]
 				}
-				statusRect := geometry.NewRect(tabX+2, tabY+25, tabW-4, 14)
+				statusRect := geometry.NewRect(tabX+2, tabY+41, tabW-4, 14)
 				secColor := tabTheme.Secondary
 				if isHovered {
 					secColor = widget.RGBA8(255, 255, 255, 255)
 				}
-				canvas.DrawText(shortStatus, statusRect, 9, secColor, isHovered, widget.TextAlignCenter)
+				canvas.DrawText(shortStatus, statusRect, 8, secColor, false, widget.TextAlignCenter)
 			}
 		}
 		canvas.PopClip()
@@ -1216,7 +1225,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	tabMinY := b.Min.Y + float32(20)
 	tabMaxY := b.Min.Y + h - float32(56)
 	tabStartY := tabMinY - s.scrollY
-	tabHeight := float32(50)
+	tabHeight := float32(64)
 	tabGap := float32(7)
 
 	var activeKey string
@@ -1255,16 +1264,30 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			canvas.StrokeRoundRect(tabRect, tabTheme.Border, 8, 1.0)
 		}
 
-		// Key & Status
-		keyRect := geometry.NewRect(tabX+2, tabY+7, tabWidth-4, 15)
+		// Line 1: Tab Key (11pt bold)
+		keyRect := geometry.NewRect(tabX+2, tabY+6, tabWidth-4, 15)
 		canvas.DrawText(iss.Key, keyRect, 11, tabTheme.Foreground, true, widget.TextAlignCenter)
 
-		shortStatus := iss.Status.Name
-		if len(shortStatus) > 12 {
-			shortStatus = shortStatus[:12]
+		// Line 2: Tab Summary (9pt regular, truncated)
+		summaryText := truncateSummary(iss.Summary, 17)
+		summaryRect := geometry.NewRect(tabX+3, tabY+23, tabWidth-6, 15)
+		summaryColor := tabTheme.Secondary
+		if isActive {
+			summaryColor = widget.RGBA8(255, 255, 255, 255)
 		}
-		statusRect := geometry.NewRect(tabX+2, tabY+26, tabWidth-4, 14)
-		canvas.DrawText(shortStatus, statusRect, 9, tabTheme.Secondary, false, widget.TextAlignCenter)
+		canvas.DrawText(summaryText, summaryRect, 9, summaryColor, isActive, widget.TextAlignCenter)
+
+		// Line 3: Tab Status (8pt regular)
+		shortStatus := iss.Status.Name
+		if len(shortStatus) > 13 {
+			shortStatus = shortStatus[:13]
+		}
+		statusRect := geometry.NewRect(tabX+2, tabY+43, tabWidth-4, 14)
+		secColor := tabTheme.Secondary
+		if isActive {
+			secColor = widget.RGBA8(255, 255, 255, 255)
+		}
+		canvas.DrawText(shortStatus, statusRect, 8, secColor, false, widget.TextAlignCenter)
 	}
 	canvas.PopClip()
 
@@ -1657,8 +1680,12 @@ func (v *AppView) Event(ctx widget.Context, e event.Event) bool {
 		v.mu.Unlock()
 
 		if st == window.StateFan || st == window.StateExpanded {
-			tabHeight := float32(50)
-			tabGap := float32(7)
+			tabHeight := float32(62)
+			tabGap := float32(6)
+			if st == window.StateExpanded {
+				tabHeight = float32(64)
+				tabGap = float32(7)
+			}
 			totalH := float32(issueCount) * (tabHeight + tabGap)
 			b := v.Bounds()
 			viewH := b.Height() - 110
@@ -1766,7 +1793,7 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 			tabMinY := b.Min.Y + float32(60)
 			tabMaxY := b.Min.Y + h - float32(50)
 			tabStartY := tabMinY - scrollY
-			tabHeight := float32(48)
+			tabHeight := float32(62)
 			tabGap := float32(6)
 
 			for i := range filtered {
@@ -1898,7 +1925,7 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		tabMinY := b.Min.Y + float32(60)
 		tabMaxY := b.Min.Y + h - float32(50)
 		tabStartY := tabMinY - scrollY
-		tabHeight := float32(48)
+		tabHeight := float32(62)
 		tabGap := float32(6)
 
 		for i, fIss := range filteredIssues {
@@ -1948,7 +1975,7 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 	tabMinY := b.Min.Y + float32(20)
 	tabMaxY := b.Min.Y + h - float32(56)
 	tabStartY := tabMinY - scrollY
-	tabHeight := float32(50)
+	tabHeight := float32(64)
 	tabGap := float32(7)
 
 	for i, iss := range filteredIssues {

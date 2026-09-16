@@ -17,7 +17,18 @@ import (
 	"github.com/gogpu/ui/widget"
 )
 
-type testMockCanvas struct{}
+type testDrawTextCall struct {
+	text     string
+	bounds   geometry.Rect
+	fontSize float32
+	color    widget.Color
+	bold     bool
+	align    widget.TextAlign
+}
+
+type testMockCanvas struct {
+	drawTexts []testDrawTextCall
+}
 
 func (m *testMockCanvas) Clear(color widget.Color)                                               {}
 func (m *testMockCanvas) DrawRect(r geometry.Rect, color widget.Color)                           {}
@@ -33,6 +44,14 @@ func (m *testMockCanvas) StrokeArc(center geometry.Point, radius float32, startA
 }
 func (m *testMockCanvas) DrawLine(from, to geometry.Point, color widget.Color, strokeWidth float32) {}
 func (m *testMockCanvas) DrawText(text string, bounds geometry.Rect, fontSize float32, color widget.Color, bold bool, align widget.TextAlign) {
+	m.drawTexts = append(m.drawTexts, testDrawTextCall{
+		text:     text,
+		bounds:   bounds,
+		fontSize: fontSize,
+		color:    color,
+		bold:     bold,
+		align:    align,
+	})
 }
 func (m *testMockCanvas) MeasureText(text string, fontSize float32, bold bool) float32 {
 	return float32(len(text)) * fontSize * 0.6
@@ -49,6 +68,7 @@ func (m *testMockCanvas) ClipBounds() geometry.Rect                      { retur
 func (m *testMockCanvas) ReplayScene(s widget.SceneCache)                {}
 
 type testMockContext struct{}
+type testContext = testMockContext
 
 func (c *testMockContext) RequestFocus(w widget.Widget)          {}
 func (c *testMockContext) ReleaseFocus(w widget.Widget)          {}
@@ -1121,6 +1141,81 @@ func TestComputeSizeFanHeight(t *testing.T) {
 		t.Errorf("computeSize(StateFan) with 15 issues = h %d, want 720", h)
 	}
 }
+
+func TestDrawTabThreeLines(t *testing.T) {
+	v := NewAppView(jira.DefaultConfig(), nil, nil)
+	defer v.Close()
+	v.issues = []jira.Issue{
+		{
+			Key:     "PROJ-101",
+			Summary: "Fix race condition in poller",
+			Status:  jira.Status{Name: "In Progress", CategoryKey: "indeterminate"},
+		},
+	}
+	v.cacheDirty = true
+	v.state = window.StateFan
+
+	mockC := &testMockCanvas{}
+	ctx := &testContext{}
+	v.Draw(ctx, mockC)
+
+	// Verify DrawText recorded calls for:
+	// 1. "PROJ-101"
+	// 2. "Fix race conditi…"
+	// 3. "In Progress"
+	var foundKey, foundSummary, foundStatus bool
+	for _, dt := range mockC.drawTexts {
+		if dt.text == "PROJ-101" {
+			foundKey = true
+		}
+		if dt.text == "Fix race conditi…" {
+			foundSummary = true
+		}
+		if dt.text == "In Progress" {
+			foundStatus = true
+		}
+	}
+
+	if !foundKey {
+		t.Error("did not find PROJ-101 in canvas text calls")
+	}
+	if !foundSummary {
+		t.Error("did not find truncated summary in canvas text calls")
+	}
+	if !foundStatus {
+		t.Error("did not find status in canvas text calls")
+	}
+
+	// Verify StateExpanded draws 3 lines as well
+	v.state = window.StateExpanded
+	v.SetBounds(geometry.NewRect(0, 0, 780, 580))
+	mockCExp := &testMockCanvas{}
+	v.Draw(ctx, mockCExp)
+
+	var foundExpKey, foundExpSummary, foundExpStatus bool
+	for _, dt := range mockCExp.drawTexts {
+		if dt.text == "PROJ-101" {
+			foundExpKey = true
+		}
+		if dt.text == "Fix race conditi…" {
+			foundExpSummary = true
+		}
+		if dt.text == "In Progress" {
+			foundExpStatus = true
+		}
+	}
+
+	if !foundExpKey {
+		t.Error("did not find PROJ-101 in expanded canvas text calls")
+	}
+	if !foundExpSummary {
+		t.Error("did not find truncated summary in expanded canvas text calls")
+	}
+	if !foundExpStatus {
+		t.Error("did not find status in expanded canvas text calls")
+	}
+}
+
 
 
 
