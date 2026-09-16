@@ -3,6 +3,8 @@ package ui
 import (
 	"fmt"
 	"image"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -16,6 +18,17 @@ import (
 	"github.com/gogpu/ui/geometry"
 	"github.com/gogpu/ui/widget"
 )
+
+func TestMain(m *testing.M) {
+	tmpDir, err := os.MkdirTemp("", "jira-ui-test-*")
+	if err == nil {
+		jira.SetConfigFilePathForTesting(filepath.Join(tmpDir, "config.json"))
+		defer os.RemoveAll(tmpDir)
+	}
+	code := m.Run()
+	jira.ResetConfigFilePathForTesting()
+	os.Exit(code)
+}
 
 type testDrawTextCall struct {
 	text     string
@@ -1099,6 +1112,31 @@ func TestAppViewEdgeMarkerDockSides(t *testing.T) {
 
 	view.SetDockSide(window.DockSideLeft)
 	view.Draw(ctx, canvas)
+}
+
+func TestAppViewDockSideDoesNotMutateRealUserConfig(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	realConfigPath := filepath.Join(home, ".jira-quick-access", "config.json")
+	var initialStat os.FileInfo
+	if info, err := os.Stat(realConfigPath); err == nil {
+		initialStat = info
+	}
+
+	cfg := jira.DefaultConfig()
+	cfg.DemoMode = true
+	view := NewAppView(cfg, nil, nil)
+	view.SetDockSide(window.DockSideLeft)
+	view.SetDockSide(window.DockSideRight)
+
+	if initialStat != nil {
+		afterStat, err := os.Stat(realConfigPath)
+		if err != nil {
+			t.Fatalf("real config file unexpectedly deleted: %v", err)
+		}
+		if afterStat.ModTime() != initialStat.ModTime() {
+			t.Fatalf("CRITICAL BUG: real user config file was modified by AppView.SetDockSide!")
+		}
+	}
 }
 
 func TestTruncateSummary(t *testing.T) {

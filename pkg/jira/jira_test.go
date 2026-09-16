@@ -677,9 +677,9 @@ func TestConfigStorageRoundtripAndPermissions(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	origHome := os.Getenv("HOME")
-	_ = os.Setenv("HOME", tempDir)
-	defer os.Setenv("HOME", origHome)
+	cfgPath := filepath.Join(tempDir, ".jira-quick-access", "config.json")
+	SetConfigFilePathForTesting(cfgPath)
+	defer ResetConfigFilePathForTesting()
 
 	cfg := Config{
 		Instances: []InstanceConfig{
@@ -717,7 +717,6 @@ func TestConfigStorageRoundtripAndPermissions(t *testing.T) {
 	}
 
 	// Verify file mode 0600
-	cfgPath := filepath.Join(tempDir, ".jira-quick-access", "config.json")
 	fileInfo, err := os.Stat(cfgPath)
 	if err != nil {
 		t.Fatalf("config file was not created: %v", err)
@@ -745,6 +744,22 @@ func TestConfigStorageRoundtripAndPermissions(t *testing.T) {
 	}
 	if loaded.Instances[0].Name != "Production" || loaded.Instances[1].Name != "Staging" {
 		t.Errorf("instance name mismatch: %+v", loaded.Instances)
+	}
+}
+
+func TestRealUserConfigNeverModifiedByTests(t *testing.T) {
+	ResetConfigFilePathForTesting()
+
+	path := getConfigFilePath()
+	home, _ := os.UserHomeDir()
+	realConfigPath := filepath.Join(home, ".jira-quick-access", "config.json")
+
+	if path == realConfigPath {
+		t.Fatalf("CRITICAL BUG: getConfigFilePath() returned real user path %q during test run!", path)
+	}
+
+	if !strings.HasPrefix(path, os.TempDir()) {
+		t.Errorf("expected test path to be within TempDir (%q), got %q", os.TempDir(), path)
 	}
 }
 

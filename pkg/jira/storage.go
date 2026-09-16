@@ -4,12 +4,60 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
+var (
+	configMu         sync.RWMutex
+	customConfigPath string
+)
+
+// SetConfigFilePathForTesting overrides the configuration file path (e.g. for testing).
+func SetConfigFilePathForTesting(path string) {
+	configMu.Lock()
+	defer configMu.Unlock()
+	customConfigPath = path
+}
+
+// ResetConfigFilePathForTesting resets any custom configuration file path override.
+func ResetConfigFilePathForTesting() {
+	configMu.Lock()
+	defer configMu.Unlock()
+	customConfigPath = ""
+}
+
+func isRunningInTest() bool {
+	return flag.Lookup("test.v") != nil
+}
+
 func getConfigFilePath() string {
+	configMu.RLock()
+	custom := customConfigPath
+	configMu.RUnlock()
+
+	if custom != "" {
+		dir := filepath.Dir(custom)
+		_ = os.MkdirAll(dir, 0755)
+		return custom
+	}
+
+	if envPath := os.Getenv("JIRA_QUICK_ACCESS_CONFIG"); envPath != "" {
+		dir := filepath.Dir(envPath)
+		_ = os.MkdirAll(dir, 0755)
+		return envPath
+	}
+
+	// Critical safety guard: NEVER write to user's real home directory during any test run!
+	if isRunningInTest() {
+		testDir := filepath.Join(os.TempDir(), "jira-quick-access-test")
+		_ = os.MkdirAll(testDir, 0755)
+		return filepath.Join(testDir, "config.json")
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "."

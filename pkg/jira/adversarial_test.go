@@ -65,9 +65,9 @@ func TestConfigSaveLoadCycleRoundTrip(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	origHome := os.Getenv("HOME")
-	_ = os.Setenv("HOME", tempDir)
-	defer os.Setenv("HOME", origHome)
+	configPath := filepath.Join(tempDir, ".jira-quick-access", "config.json")
+	SetConfigFilePathForTesting(configPath)
+	defer ResetConfigFilePathForTesting()
 
 	cfg := Config{
 		Instances: []InstanceConfig{
@@ -106,7 +106,6 @@ func TestConfigSaveLoadCycleRoundTrip(t *testing.T) {
 	}
 
 	// Verify file permissions (0600)
-	configPath := filepath.Join(tempDir, ".jira-quick-access", "config.json")
 	info, err := os.Stat(configPath)
 	if err != nil {
 		t.Fatalf("config file not found: %v", err)
