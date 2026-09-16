@@ -1216,6 +1216,55 @@ func TestDrawTabThreeLines(t *testing.T) {
 	}
 }
 
+type mockManager struct {
+	window.WindowManager
+	tooltip string
+}
 
+func (m *mockManager) InitEdgeRail(width, height int) error                  { return nil }
+func (m *mockManager) SetState(state window.WindowState, width, height int) {}
+func (m *mockManager) Dock(width, height int)                               {}
+func (m *mockManager) DockToRightEdge(width, height int)                    {}
+func (m *mockManager) SetDockSide(side window.DockSide)                     {}
+func (m *mockManager) GetDockSide() window.DockSide                         { return window.DockSideRight }
+func (m *mockManager) SetMonitor(screenIndex int)                           {}
+func (m *mockManager) GetSelectedMonitor() int                              { return 0 }
+func (m *mockManager) GetMonitors() []window.MonitorInfo                    { return nil }
+func (m *mockManager) SetPositionRatio(ratio float64)                       {}
+func (m *mockManager) GetPositionRatio() float64                            { return 0.5 }
+func (m *mockManager) StartWindowDrag()                                     {}
+func (m *mockManager) OpenTicketURL(url string) error                       { return nil }
+func (m *mockManager) SetAlwaysOnTop(alwaysOnTop bool)                      {}
+func (m *mockManager) GetAlwaysOnTop() bool                                 { return false }
+func (m *mockManager) SetAutoHide(autoHide bool)                            {}
+func (m *mockManager) GetAutoHide() bool                                    { return false }
+func (m *mockManager) SetTucked(tucked bool, width, height int)             {}
+func (m *mockManager) SetToolTip(tooltip string) {
+	m.tooltip = tooltip
+}
 
+func TestHoverTooltipLifecycle(t *testing.T) {
+	mgr := &mockManager{}
+	orig := window.DefaultManager
+	defer func() { window.DefaultManager = orig }()
+	window.DefaultManager = mgr
 
+	v := NewAppView(jira.DefaultConfig(), nil, nil)
+	v.issues = []jira.Issue{
+		{Key: "PROJ-1", Summary: "Build rocket", Status: jira.Status{Name: "To Do"}},
+	}
+	v.cacheDirty = true
+	v.state = window.StateFan
+
+	// Hover over first tab
+	v.setHoveredTab(0)
+	if mgr.tooltip != "[PROJ-1] Build rocket • To Do" {
+		t.Errorf("expected tooltip on hover, got %q", mgr.tooltip)
+	}
+
+	// Exit hover
+	v.setHoveredTab(-1)
+	if mgr.tooltip != "" {
+		t.Errorf("expected tooltip to be cleared, got %q", mgr.tooltip)
+	}
+}

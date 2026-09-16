@@ -238,8 +238,11 @@ func NewAppView(
 						v.mu.Lock()
 						v.lastHover = time.Now()
 						v.mu.Unlock()
-					} else if !lastH.IsZero() && time.Since(lastH) > 300*time.Millisecond {
-						v.SetState(window.StateRest)
+					} else {
+						v.setHoveredTab(-1)
+						if !lastH.IsZero() && time.Since(lastH) > 300*time.Millisecond {
+							v.SetState(window.StateRest)
+						}
 					}
 				} else if st == window.StateRest {
 					if inside {
@@ -504,6 +507,23 @@ func (v *AppView) getFilteredIssues() []jira.Issue {
 	return v.getFilteredIssuesLocked()
 }
 
+func (v *AppView) setHoveredTab(idx int) {
+	v.mu.Lock()
+	if v.hoveredTabIdx == idx {
+		v.mu.Unlock()
+		return
+	}
+	v.hoveredTabIdx = idx
+	var tip string
+	filtered := v.getFilteredIssuesLocked()
+	if idx >= 0 && idx < len(filtered) {
+		iss := filtered[idx]
+		tip = fmt.Sprintf("[%s] %s • %s", iss.Key, iss.Summary, iss.Status.Name)
+	}
+	v.mu.Unlock()
+	window.SetToolTip(tip)
+}
+
 func (v *AppView) snapshot() appViewStateSnapshot {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -599,6 +619,10 @@ func (v *AppView) SetState(newState window.WindowState) {
 	}
 	showSettings := v.showSettings
 	v.mu.Unlock()
+
+	if newState == window.StateRest {
+		window.SetToolTip("")
+	}
 
 	if newState != window.StateRest {
 		v.setTucked(false)
@@ -1669,6 +1693,8 @@ func (v *AppView) Event(ctx widget.Context, e event.Event) bool {
 		} else if ev.MouseType == event.MouseMove {
 			if contains {
 				return v.handleHover(ev.Position)
+			} else {
+				v.setHoveredTab(-1)
 			}
 		}
 	case *event.WheelEvent:
@@ -1811,9 +1837,9 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 
 		if newHoverTab != prevHoverTab || newHoverSet != prevHoverSet {
 			v.mu.Lock()
-			v.hoveredTabIdx = newHoverTab
 			v.hoveredSettings = newHoverSet
 			v.mu.Unlock()
+			v.setHoveredTab(newHoverTab)
 			v.MarkNeedsLayout()
 			if v.onRedraw != nil {
 				v.onRedraw()
