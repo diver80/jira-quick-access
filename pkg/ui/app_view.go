@@ -843,6 +843,21 @@ func getCursorIndexFromX(text string, fontSize float32, clickX float32) int {
 	return bestIdx
 }
 
+func truncateSummary(text string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
+	clean := strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+	runes := []rune(clean)
+	if len(runes) <= maxLen {
+		return clean
+	}
+	if maxLen <= 1 {
+		return "…"
+	}
+	return string(runes[:maxLen-1]) + "…"
+}
+
 func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	s := v.snapshot()
 	b := s.bounds

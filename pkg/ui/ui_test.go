@@ -1071,4 +1071,26 @@ func TestAppViewEdgeMarkerDockSides(t *testing.T) {
 	view.Draw(ctx, canvas)
 }
 
+func TestTruncateSummary(t *testing.T) {
+	tests := []struct {
+		input    string
+		maxLen   int
+		expected string
+	}{
+		{"", 17, ""},
+		{"Short text", 17, "Short text"},
+		{"Exact seventeen c", 17, "Exact seventeen c"},
+		{"Implement OAuth PKCE Flow", 17, "Implement OAuth …"},
+		{"   Spaced   out   summary   ", 17, "Spaced out summa…"},
+		{"Fix race condition in token poller", 10, "Fix race …"},
+	}
+
+	for _, tt := range tests {
+		got := truncateSummary(tt.input, tt.maxLen)
+		if got != tt.expected {
+			t.Errorf("truncateSummary(%q, %d) = %q; want %q", tt.input, tt.maxLen, got, tt.expected)
+		}
+	}
+}
+
 
