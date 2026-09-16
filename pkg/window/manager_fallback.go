@@ -116,6 +116,7 @@ func (m *FallbackManager) GetAlwaysOnTop() bool            { return true }
 func (m *FallbackManager) SetAutoHide(autoHide bool)       {}
 func (m *FallbackManager) GetAutoHide() bool               { return false }
 func (m *FallbackManager) SetTucked(tucked bool, w, h int) {}
+func (m *FallbackManager) SetToolTip(tooltip string)       {}
 
 func IsMouseInside() bool                                     { return true }
 func SetMobileWebViewVisible(visible bool, width, height int) {}

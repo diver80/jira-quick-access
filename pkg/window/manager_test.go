@@ -182,3 +182,36 @@ func TestWindowManagerConcurrencyRace(t *testing.T) {
 
 	wg.Wait()
 }
+
+type mockManager struct {
+	WindowManager
+	tooltip string
+}
+
+func (m *mockManager) SetToolTip(tooltip string) {
+	m.tooltip = tooltip
+}
+
+func TestManagerSetToolTip(t *testing.T) {
+	mgr := &mockManager{}
+	var wm WindowManager = mgr
+	wm.SetToolTip("PROJ-102: Implement OAuth Flow")
+	if mgr.tooltip != "PROJ-102: Implement OAuth Flow" {
+		t.Errorf("expected tooltip to be set, got %q", mgr.tooltip)
+	}
+	mgr.SetToolTip("")
+	if mgr.tooltip != "" {
+		t.Errorf("expected tooltip to be cleared, got %q", mgr.tooltip)
+	}
+
+	// Also verify package-level helper does not panic when DefaultManager is nil or set
+	orig := DefaultManager
+	defer func() { DefaultManager = orig }()
+	DefaultManager = nil
+	SetToolTip("SHOULD_NOT_PANIC")
+	DefaultManager = mgr
+	SetToolTip("TEST-1")
+	if mgr.tooltip != "TEST-1" {
+		t.Errorf("expected package-level SetToolTip to update manager, got %q", mgr.tooltip)
+	}
+}

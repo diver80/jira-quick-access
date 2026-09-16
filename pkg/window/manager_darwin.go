@@ -548,6 +548,19 @@ static char *DarwinPasteText(void) {
     const char *utf8 = [val UTF8String];
     return utf8 ? strdup(utf8) : NULL;
 }
+
+static void DarwinSetToolTip(const char *text) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!g_appWindow) return;
+        NSView *cv = [g_appWindow contentView];
+        if (!cv) return;
+        [cv removeAllToolTips];
+        if (text && strlen(text) > 0) {
+            NSString *tip = [NSString stringWithUTF8String:text];
+            [cv setToolTip:tip];
+        }
+    });
+}
 */
 import "C"
 import (
@@ -820,6 +833,12 @@ func (m *DarwinManager) SetTucked(tucked bool, width, height int) {
 		height = 224
 	}
 	C.DarwinSetTucked(C.int(val), C.int(width), C.int(height))
+}
+
+func (m *DarwinManager) SetToolTip(tooltip string) {
+	cTip := C.CString(tooltip)
+	defer C.free(unsafe.Pointer(cTip))
+	C.DarwinSetToolTip(cTip)
 }
 
 func IsMouseInside() bool {

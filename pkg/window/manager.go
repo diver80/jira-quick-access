@@ -61,9 +61,17 @@ type WindowManager interface {
 	SetAutoHide(autoHide bool)
 	GetAutoHide() bool
 	SetTucked(tucked bool, width, height int)
+	SetToolTip(tooltip string)
 }
 
 var DefaultManager WindowManager
+
+// SetToolTip updates the tooltip text on the window's content view.
+func SetToolTip(tooltip string) {
+	if DefaultManager != nil {
+		DefaultManager.SetToolTip(tooltip)
+	}
+}
 
 // SetAlwaysOnTop updates whether the window floats above all normal desktop windows.
 func SetAlwaysOnTop(alwaysOnTop bool) {

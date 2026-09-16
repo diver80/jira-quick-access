@@ -178,6 +178,7 @@ func (m *WindowsManager) GetAlwaysOnTop() bool            { return true }
 func (m *WindowsManager) SetAutoHide(autoHide bool)       {}
 func (m *WindowsManager) GetAutoHide() bool               { return false }
 func (m *WindowsManager) SetTucked(tucked bool, w, h int) {}
+func (m *WindowsManager) SetToolTip(tooltip string)       {}
 
 func IsMouseInside() bool                                     { return true }
 func SetMobileWebViewVisible(visible bool, width, height int) {}
