@@ -4,7 +4,7 @@ Jira tickets that live at the edge of your screen. A high-performance native des
 
 No dock clutter, no window to manage. Slide the pointer to the right edge and the deck fans out.
 
-📥 **[Download for macOS (.dmg Installer)](dist/osx/Jira%20Quick%20Access-v1.0.0-macOS-Universal.dmg)** · **[macOS App Bundle & Assets](dist/osx/)**
+📥 **[Download for macOS (.dmg Installer)](dist/osx/Jira%20Quick%20Access-v1.0.0-macOS-Universal.dmg)** · **[macOS App Bundle & Assets](dist/osx/)** · 📖 **[Fachlicher & Technischer Hintergrund (Deutsch)](docs/HINTERGRUND.md)**
 
 > [!NOTE]
 > **Platform Support**: Currently, **only the macOS (Darwin) version is actively tested and verified** (with native Cocoa edge docking, Retina multi-resolution icons, and embedded WebKit). Windows and Linux builds are experimental cross-compilations and not yet thoroughly tested.
@@ -13,11 +13,11 @@ No dock clutter, no window to manage. Slide the pointer to the right edge and th
 
 | At rest | Fanned | A ticket pulled open |
 |---|---|---|
-| ![The deck at rest: 32 pt macOS Dock frosted capsule with instance beacons & proportional status gauges](docs/screenshots/rest.png) | ![The deck fanned into shingled pastel tabs](docs/screenshots/fan.png) | ![A ticket pulled open in full-size native WebKit view](docs/screenshots/expanded.png) |
+| ![The deck at rest: 36 pt macOS Dock frosted capsule with instance beacons & proportional status gauges](docs/screenshots/rest.png) | ![The deck fanned into shingled pastel tabs](docs/screenshots/fan.png) | ![A ticket pulled open in full-size native WebKit view](docs/screenshots/expanded.png) |
 
 | State | What you see | Trigger |
 |---|---|---|
-| **Rest** | A 32 pt discrete frosted glass capsule on the right screen edge — glowing beacons, live ticket counts, and proportional status breakdown gauges (To Do / In Progress / Done) per instance | idle |
+| **Rest** | A 36 pt discrete frosted glass capsule on the right screen edge — glowing beacons, live ticket counts, and proportional status breakdown gauges (To Do / In Progress / Done) per instance | idle |
 | **Fan** | Ticket tabs shingle down the edge with instant search, multi-instance cycling, and animated Dock-style hover magnification | pointer enters the capsule |
 | **Expanded** | The ticket slides open in full size via embedded hardware-accelerated WebKit, stripped of bloated Jira navigation headers, level with its own side shelf | click a tab |
 
@@ -45,7 +45,7 @@ You can also drop a `.env` file (see `.env.example`) directly in the app's worki
 ## ✨ Features & Polish
 
 ### 🏝️ 3-State Edge Rail Architecture
-- **Resting Capsule (32×224)**: Minimalist frosted glass capsule anchored to the screen edge. Features continuous 1.5px frosted white border stroke, instance beacon halos, centered count badges, and proportional gauge lines scaled against maximum workload.
+- **Resting Capsule (36×224)**: Minimalist frosted glass capsule anchored to the screen edge. Features continuous 1.5px frosted white border stroke, instance beacon halos, centered count badges, and proportional gauge lines scaled against maximum workload.
 - **Interactive Fan Deck (120×H)**: Vertical tabs cascade down the edge. Resting the mouse over a tab triggers an organic **macOS Dock lift effect** — sliding 4px to the left with a radiant glowing border and vibrant indicator pill.
 - **Embedded WebKit Experience (780×580)**: Native macOS `WKWebView` renders the complete Jira issue directly on screen. Clean user script removes global Atlassian navigation headers, giving you pure issue content.
 
