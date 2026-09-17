@@ -150,12 +150,12 @@ func TestAppViewStateTransitionsAndBounds(t *testing.T) {
 		t.Fatalf("expected initial state StateRest, got %v", view.state)
 	}
 	w, h := view.computeSize(view.state)
-	if w != 32 || h != 224 {
-		t.Errorf("expected Rest size (32, 224), got (%d, %d)", w, h)
+	if w != 36 || h != 224 {
+		t.Errorf("expected Rest size (36, 224), got (%d, %d)", w, h)
 	}
 	sz := view.Layout(ctx, geometry.Loose(geometry.Sz(800, 600)))
-	if sz.Width != 32 || sz.Height != 224 {
-		t.Errorf("expected Layout size in Rest to be (32, 224), got (%v, %v)", sz.Width, sz.Height)
+	if sz.Width != 36 || sz.Height != 224 {
+		t.Errorf("expected Layout size in Rest to be (36, 224), got (%v, %v)", sz.Width, sz.Height)
 	}
 
 	// 2. Transition to Fan

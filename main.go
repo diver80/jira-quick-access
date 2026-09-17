@@ -28,10 +28,10 @@ func main() {
 	// 2. Initialize Jira multi-tenant REST client
 	client := jira.NewClient(cfg)
 
-	// 3. Initialize Gogpu engine with macOS Dock dimensions (32x224)
+	// 3. Initialize Gogpu engine with macOS Dock dimensions (36x224)
 	gogpuApp := gogpu.NewApp(gogpu.Config{
 		Title:  "",
-		Width:  32,
+		Width:  36,
 		Height: 224,
 	})
 
@@ -73,7 +73,8 @@ func main() {
 		for _, delay := range []time.Duration{60 * time.Millisecond, 200 * time.Millisecond, 500 * time.Millisecond} {
 			time.Sleep(delay)
 			if window.DefaultManager != nil {
-				_ = window.DefaultManager.InitEdgeRail(32, 224)
+				window.DefaultManager.SetDockSide(window.DockSide(cfg.DockSide))
+				_ = window.DefaultManager.InitEdgeRail(36, 224)
 			}
 			gogpuApp.RequestRedraw()
 		}

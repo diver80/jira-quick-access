@@ -37,7 +37,7 @@ func init() {
 		dockSide:      DockSideRight,
 		monitorIndex:  0,
 		posYRatio:     0.5,
-		currentWidth:  32,
+		currentWidth:  36,
 		currentHeight: 224,
 	}
 }

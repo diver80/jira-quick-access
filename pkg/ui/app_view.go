@@ -176,7 +176,7 @@ func NewAppView(
 
 	v.SetVisible(true)
 	v.SetEnabled(true)
-	v.SetBounds(geometry.NewRect(0, 0, 32, 224))
+	v.SetBounds(geometry.NewRect(0, 0, 36, 224))
 
 	// Register collapse handler (for native close button and Escape key)
 	window.RegisterCollapseHandler(func() {
@@ -426,7 +426,7 @@ func (v *AppView) setTucked(tucked bool) {
 	v.mu.Unlock()
 
 	if st == window.StateRest {
-		window.SetTucked(tucked, 32, 224)
+		window.SetTucked(tucked, 36, 224)
 	}
 }
 
@@ -612,7 +612,7 @@ func (v *AppView) snapshot() appViewStateSnapshot {
 func (v *AppView) computeSize(st window.WindowState) (int, int) {
 	switch st {
 	case window.StateRest:
-		return 32, 224
+		return 36, 224
 
 	case window.StateFan:
 		issues := v.getFilteredIssues()
@@ -632,7 +632,7 @@ func (v *AppView) computeSize(st window.WindowState) (int, int) {
 	case window.StateExpanded:
 		return 780, 580
 	}
-	return 32, 224
+	return 36, 224
 }
 
 func (v *AppView) SetState(newState window.WindowState) {
@@ -925,23 +925,25 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	h := float32(expectedH)
 	b := geometry.NewRect(s.bounds.Min.X, s.bounds.Min.Y, w, h)
 
+
 	// =========================================================================
 	// 1. STATE REST: macOS Dock Glass Capsule with Complete Crisp White Border
 	// =========================================================================
 	if s.state == window.StateRest {
-		// Inset pill by 1px on all sides so the stroke is 100% visible and unclipped
-		pillRect := geometry.NewRect(b.Min.X+1.0, b.Min.Y+1.0, w-2.0, h-2.0)
-		pillRadius := float32(15.0)
+		// Inset pill by 1.5px on all sides so the stroke is 100% visible, fully rounded and unclipped
+		pillRect := geometry.NewRect(b.Min.X+1.5, b.Min.Y+1.5, w-3.0, h-3.0)
+		pillRadius := float32((w - 3.0) / 2.0)
 
 		// 1. Deep frosted glass backdrop
 		canvas.DrawRoundRect(pillRect, widget.RGBA8(16, 22, 34, 245), pillRadius)
 		// 2. Complete, crisp, prominent frosted white border all the way around
-		canvas.StrokeRoundRect(pillRect, widget.RGBA8(255, 255, 255, 120), pillRadius, 1.5)
+		canvas.StrokeRoundRect(pillRect, widget.RGBA8(255, 255, 255, 140), pillRadius, 1.5)
 
 		// 3. Subtle top drag handle grip dots (···)
-		canvas.DrawCircle(geometry.Pt(b.Min.X+w/2-5, b.Min.Y+5), 1.2, widget.RGBA8(255, 255, 255, 120))
-		canvas.DrawCircle(geometry.Pt(b.Min.X+w/2, b.Min.Y+5), 1.2, widget.RGBA8(255, 255, 255, 120))
-		canvas.DrawCircle(geometry.Pt(b.Min.X+w/2+5, b.Min.Y+5), 1.2, widget.RGBA8(255, 255, 255, 120))
+		centerX := b.Min.X + w/2
+		canvas.DrawCircle(geometry.Pt(centerX-5, b.Min.Y+6), 1.2, widget.RGBA8(255, 255, 255, 120))
+		canvas.DrawCircle(geometry.Pt(centerX, b.Min.Y+6), 1.2, widget.RGBA8(255, 255, 255, 120))
+		canvas.DrawCircle(geometry.Pt(centerX+5, b.Min.Y+6), 1.2, widget.RGBA8(255, 255, 255, 120))
 
 		instCount := len(s.instances)
 		if instCount == 0 {
@@ -965,7 +967,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		}
 
 		for idx, inst := range s.instances {
-			secY := b.Min.Y + float32(6+float32(idx)*instSectionH)
+			secY := b.Min.Y + float32(8+float32(idx)*instSectionH)
 
 			var instIssues []jira.Issue
 			for _, iss := range s.issues {
@@ -978,20 +980,18 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			// User-defined profile accent color palette
 			beaconColor, beaconGlow, inProgColor, todoColor, trackColor, badgeBg, badgeBorder := GetInstanceColors(inst.Color, idx)
 
-			// Instance Beacon Core & Radiant Glow (Centered at X: 16)
-			beaconCenter := geometry.Pt(b.Min.X+w/2, secY+8)
+			// Instance Beacon Core & Radiant Glow (Centered at capsule middle X)
+			beaconCenter := geometry.Pt(centerX, secY+8)
 			canvas.DrawCircle(beaconCenter, 6.0, beaconGlow)
 			canvas.DrawCircle(beaconCenter, 3.5, beaconColor)
 
-			// Edge marker & ticket badge positioning (adapts to Left / Right dock side)
-			markerX := b.Min.X + w - 5.5
-			badgeX := b.Min.X + 3.5
+			// Edge marker gauge indicator line (placed on the screen-docked edge)
+			markerX := b.Min.X + w - 4.5
 			if s.dockSide == window.DockSideLeft {
-				markerX = b.Min.X + 5.5
-				badgeX = b.Min.X + 9.5
+				markerX = b.Min.X + 4.5
 			}
 
-			lineTopY := secY + 3
+			lineTopY := secY + 4
 			lineBottomY := secY + instSectionH - 5
 			lineTotalH := lineBottomY - lineTopY
 
@@ -1041,14 +1041,16 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				}
 			}
 
-			// Clean Centered Ticket Count Badge Pill
+			// Clean Centered Ticket Count Badge Pill (aligned under beacon)
 			countStr := fmt.Sprintf("%d", count)
 			badgeW := float32(19)
 			badgeH := float32(18)
-			countBox := geometry.NewRect(badgeX, secY+18, badgeW, badgeH)
+			badgeX := centerX - badgeW/2
+			badgeY := secY + 18
+			countBox := geometry.NewRect(badgeX, badgeY, badgeW, badgeH)
 			canvas.DrawRoundRect(countBox, badgeBg, 5)
 			canvas.StrokeRoundRect(countBox, badgeBorder, 5, 1.0)
-			canvas.DrawText(countStr, geometry.NewRect(badgeX, secY+20, badgeW, badgeH-2), 10, widget.RGBA8(245, 250, 255, 255), true, widget.TextAlignCenter)
+			canvas.DrawText(countStr, geometry.NewRect(badgeX, badgeY+2, badgeW, badgeH-2), 10, widget.RGBA8(245, 250, 255, 255), true, widget.TextAlignCenter)
 
 			// Subtle Divider between instances
 			if idx < len(s.instances)-1 {
@@ -1062,7 +1064,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		canvas.DrawLine(geometry.Pt(b.Min.X+7, dividerY), geometry.Pt(b.Min.X+w-7, dividerY), widget.RGBA8(255, 255, 255, 45), 1.0)
 
 		// Settings Cog Icon
-		settingsCenter := geometry.Pt(b.Min.X+w/2, b.Min.Y+h-14)
+		settingsCenter := geometry.Pt(centerX, b.Min.Y+h-14)
 		canvas.DrawCircle(settingsCenter, 6.5, widget.RGBA8(180, 200, 230, 45))
 		canvas.DrawCircle(settingsCenter, 3.8, widget.RGBA8(200, 220, 245, 240))
 		return

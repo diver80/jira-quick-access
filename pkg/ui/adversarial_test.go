@@ -23,8 +23,8 @@ func TestAppViewStateTransitionsAndLifecycle(t *testing.T) {
 		t.Errorf("expected initial state Rest, got %v", view.state)
 	}
 	w, h := view.computeSize(view.state)
-	if w != 32 || h != 224 {
-		t.Errorf("expected Rest dimensions (32, 224), got (%d, %d)", w, h)
+	if w != 36 || h != 224 {
+		t.Errorf("expected Rest dimensions (36, 224), got (%d, %d)", w, h)
 	}
 
 	// Transition to Fan

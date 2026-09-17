@@ -225,14 +225,14 @@ static void DarwinDock(int width, int height, int animate) {
         CGFloat x = 0;
         if (g_dockSide == 1) {
             // Docked to LEFT edge
-            if (g_autoHide && g_isTucked && width <= 40) {
+            if (g_autoHide && g_isTucked && width <= 45) {
                 x = screenFrame.origin.x - (CGFloat)width + 6.0;
             } else {
                 x = screenFrame.origin.x;
             }
         } else {
             // Docked to RIGHT edge
-            if (g_autoHide && g_isTucked && width <= 40) {
+            if (g_autoHide && g_isTucked && width <= 45) {
                 x = screenFrame.origin.x + screenFrame.size.width - 6.0;
             } else {
                 x = screenFrame.origin.x + screenFrame.size.width - (CGFloat)width;
@@ -624,7 +624,7 @@ func init() {
 			dockSide:      DockSideRight,
 			monitorIndex:  0,
 			posYRatio:     0.5,
-			currentWidth:  32,
+			currentWidth:  36,
 			currentHeight: 224,
 		}
 	}
@@ -669,7 +669,7 @@ func (m *DarwinManager) SetDockSide(side DockSide) {
 	w := m.currentWidth
 	h := m.currentHeight
 	if w <= 0 {
-		w = 32
+		w = 36
 	}
 	if h <= 0 {
 		h = 224
@@ -695,7 +695,7 @@ func (m *DarwinManager) SetMonitor(screenIndex int) {
 	w := m.currentWidth
 	h := m.currentHeight
 	if w <= 0 {
-		w = 32
+		w = 36
 	}
 	if h <= 0 {
 		h = 224
@@ -763,7 +763,7 @@ func (m *DarwinManager) SetPositionRatio(ratio float64) {
 	w := m.currentWidth
 	h := m.currentHeight
 	if w <= 0 {
-		w = 32
+		w = 36
 	}
 	if h <= 0 {
 		h = 224
@@ -784,7 +784,7 @@ func (m *DarwinManager) StartWindowDrag() {
 	w := m.currentWidth
 	h := m.currentHeight
 	if w <= 0 {
-		w = 32
+		w = 36
 	}
 	if h <= 0 {
 		h = 224
@@ -827,7 +827,7 @@ func (m *DarwinManager) SetTucked(tucked bool, width, height int) {
 		val = 1
 	}
 	if width <= 0 {
-		width = 32
+		width = 36
 	}
 	if height <= 0 {
 		height = 224

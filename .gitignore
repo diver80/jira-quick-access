@@ -9,6 +9,8 @@
 *.dll
 *.so
 *.dylib
+*.app/
+*.noindex/
 
 # macOS System Files
 .DS_Store

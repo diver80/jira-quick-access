@@ -57,10 +57,11 @@ build_osx() {
     mkdir -p "${DIST_DIR}/osx/amd64"
     GOOS=darwin GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o "${DIST_DIR}/osx/amd64/${APP_NAME}" .
     
-    # 3. Create macOS .app Bundle
-    APP_BUNDLE="${DIST_DIR}/osx/${APP_DISPLAY_NAME}.app"
+    # 3. Create macOS .app Bundle in .noindex staging directory (prevents Spotlight duplicate indexing)
+    STAGING_DIR="${DIST_DIR}/osx.noindex"
+    APP_BUNDLE="${STAGING_DIR}/${APP_DISPLAY_NAME}.app"
     echo -e "   -> Creating macOS App Bundle at ${APP_BUNDLE}..."
-    rm -rf "${APP_BUNDLE}"
+    rm -rf "${STAGING_DIR}"
     mkdir -p "${APP_BUNDLE}/Contents/MacOS"
     mkdir -p "${APP_BUNDLE}/Contents/Resources"
     
@@ -124,7 +125,7 @@ EOF
     # 4. Create DMG Installer
     if command -v hdiutil >/dev/null 2>&1; then
         echo -e "   -> Building macOS DMG installer (with /Applications drag-and-drop)..."
-        DMG_STAGING="${DIST_DIR}/osx/dmg_staging"
+        DMG_STAGING="${STAGING_DIR}/dmg_staging"
         DMG_FILE="${DIST_DIR}/osx/${APP_DISPLAY_NAME}-v${VERSION}-macOS-Universal.dmg"
         rm -rf "${DMG_STAGING}" "${DMG_FILE}"
         mkdir -p "${DMG_STAGING}"
@@ -138,9 +139,7 @@ EOF
         rm -rf "${DMG_STAGING}"
     fi
 
-    cd "${DIST_DIR}/osx"
-    tar -czf "JiraQuickAccess-macOS-Universal.tar.gz" -C "${DIST_DIR}/osx" "${APP_DISPLAY_NAME}.app"
-    cd - > /dev/null
+    tar -czf "${DIST_DIR}/osx/JiraQuickAccess-macOS-Universal.tar.gz" -C "${STAGING_DIR}" "${APP_DISPLAY_NAME}.app"
 
     echo -e "${GREEN}✓ macOS build & DMG completed!${NC}"
 }
@@ -182,7 +181,7 @@ build_lin() {
 install_osx() {
     build_osx
     echo -e "${BLUE}📲 Installing ${APP_DISPLAY_NAME} to /Applications...${NC}"
-    APP_BUNDLE="${DIST_DIR}/osx/${APP_DISPLAY_NAME}.app"
+    APP_BUNDLE="${DIST_DIR}/osx.noindex/${APP_DISPLAY_NAME}.app"
     DEST_APP="/Applications/${APP_DISPLAY_NAME}.app"
     
     # If running, terminate previous instance
@@ -193,6 +192,9 @@ install_osx() {
     
     # Remove quarantine flag for local build
     xattr -dr com.apple.quarantine "${DEST_APP}" 2>/dev/null || true
+    
+    # Clean up staging app bundle to ensure Spotlight only indexes /Applications
+    rm -rf "${DIST_DIR}/osx.noindex"
     
     echo -e "${GREEN}✓ Successfully installed to ${DEST_APP}!${NC}"
     echo -e "${CYAN}💡 You can now launch it via Spotlight (⌘+Space -> 'Jira Quick Access') or Applications folder.${NC}"
