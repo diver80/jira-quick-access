@@ -1645,5 +1645,59 @@ func TestNoZoomBugOnStateTransitions(t *testing.T) {
 	}
 }
 
+func TestStatusEmptyTicketListAndStateRestore(t *testing.T) {
+	view, _ := createTestAppView()
+	defer view.Close()
+
+	// Initially in StateRest
+	view.SetState(window.StateRest)
+
+	// 1. Calling OpenStatus from StateRest opens StateExpanded
+	view.OpenStatus()
+	if !view.IsStatusOpen() || view.state != window.StateExpanded {
+		t.Fatalf("expected Status open in StateExpanded, got state=%v, isOpen=%v", view.state, view.IsStatusOpen())
+	}
+
+	// 2. Snapshot must have empty filteredIssues when status is showing
+	snap := view.snapshot()
+	if len(snap.filteredIssues) != 0 {
+		t.Errorf("expected snapshot.filteredIssues to be empty while viewing status, got %d issues", len(snap.filteredIssues))
+	}
+
+	// 3. Hovering over the side rail area must NOT hover any ticket tabs
+	view.handleHover(geometry.Pt(780-50, 80))
+	if view.hoveredTabIdx != -1 {
+		t.Errorf("expected hoveredTabIdx=-1 while viewing status, got %d", view.hoveredTabIdx)
+	}
+
+	// 4. Clicking in the rail area where tabs normally are must NOT expand any ticket
+	view.activeIdx = 0
+	view.handleClick(geometry.Pt(780-50, 80))
+	if !view.IsStatusOpen() {
+		t.Errorf("clicking in rail during status must not close status or switch ticket")
+	}
+
+	// 5. Closing Status restores origin state (StateRest)
+	view.CloseStatus()
+	if view.IsStatusOpen() {
+		t.Errorf("expected status to be closed")
+	}
+	if view.state != window.StateRest {
+		t.Errorf("expected state to return to StateRest, got %v", view.state)
+	}
+
+	// 6. Calling OpenStatus from StateFan restores StateFan upon close
+	view.SetState(window.StateFan)
+	view.OpenStatus()
+	if !view.IsStatusOpen() || view.state != window.StateExpanded {
+		t.Fatalf("expected Status open in StateExpanded from Fan")
+	}
+	view.CloseStatus()
+	if view.state != window.StateFan {
+		t.Errorf("expected state to return to StateFan, got %v", view.state)
+	}
+}
+
+
 
 

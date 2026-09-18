@@ -88,6 +88,8 @@ type AppView struct {
 	statusReport      status.StatusReport
 	hoveredStatus     bool
 	statusIntervalVal string
+	statusOpenedFrom   window.WindowState
+	settingsOpenedFrom window.WindowState
 
 	// Callbacks
 	onRedraw       func()
@@ -170,6 +172,8 @@ func NewAppView(
 		debugMode:       cfg.DebugMode,
 		intervalVal:       fmt.Sprintf("%d", cfg.PollInterval),
 		statusIntervalVal: fmt.Sprintf("%d", cfg.StatusPollInterval),
+		statusOpenedFrom:   window.StateFan,
+		settingsOpenedFrom: window.StateFan,
 		statusClient:      status.NewClient(),
 		statusReport:    status.StatusReport{OverallIndicator: status.IndicatorNone, OverallText: "All Systems Operational"},
 		onRedraw:        onRedraw,
@@ -205,12 +209,10 @@ func NewAppView(
 		showStat := v.showStatus
 		v.mu.Unlock()
 
-		if showSet || showStat {
-			v.mu.Lock()
-			v.showSettings = false
-			v.showStatus = false
-			v.mu.Unlock()
-			v.SetState(window.StateFan)
+		if showStat {
+			v.CloseStatus()
+		} else if showSet {
+			v.CloseSettings()
 		} else if st == window.StateExpanded {
 			v.SetState(window.StateFan)
 		} else if st == window.StateFan {
@@ -585,8 +587,11 @@ func (v *AppView) snapshot() appViewStateSnapshot {
 	copy(issues, v.issues)
 
 	filtered := v.getFilteredIssuesLocked()
-	filteredClone := make([]jira.Issue, len(filtered))
-	copy(filteredClone, filtered)
+	var filteredClone []jira.Issue
+	if !v.showStatus {
+		filteredClone = make([]jira.Issue, len(filtered))
+		copy(filteredClone, filtered)
+	}
 
 	monitors := make([]window.MonitorInfo, len(v.monitors))
 	copy(monitors, v.monitors)
@@ -823,6 +828,9 @@ func (v *AppView) OpenSettings() {
 	v.mu.Lock()
 	v.showSettings = true
 	v.showStatus = false
+	if v.state == window.StateRest || v.state == window.StateFan {
+		v.settingsOpenedFrom = v.state
+	}
 	v.loadInstanceFieldsLocked(v.selectedInstIdx)
 	v.statusMsg = ""
 	v.mu.Unlock()
@@ -834,23 +842,34 @@ func (v *AppView) ToggleSettings() {
 	v.showSettings = !v.showSettings
 	if v.showSettings {
 		v.showStatus = false
+		if v.state == window.StateRest || v.state == window.StateFan {
+			v.settingsOpenedFrom = v.state
+		}
 	}
 	v.loadInstanceFieldsLocked(v.selectedInstIdx)
 	v.statusMsg = ""
 	st := v.showSettings
+	targetState := v.settingsOpenedFrom
+	if targetState != window.StateRest && targetState != window.StateFan {
+		targetState = window.StateFan
+	}
 	v.mu.Unlock()
 	if st {
 		v.SetState(window.StateExpanded)
 	} else {
-		v.SetState(window.StateFan)
+		v.SetState(targetState)
 	}
 }
 
 func (v *AppView) CloseSettings() {
 	v.mu.Lock()
 	v.showSettings = false
+	targetState := v.settingsOpenedFrom
+	if targetState != window.StateRest && targetState != window.StateFan {
+		targetState = window.StateFan
+	}
 	v.mu.Unlock()
-	v.SetState(window.StateFan)
+	v.SetState(targetState)
 }
 
 func (v *AppView) IsStatusOpen() bool {
@@ -863,6 +882,9 @@ func (v *AppView) OpenStatus() {
 	v.mu.Lock()
 	v.showStatus = true
 	v.showSettings = false
+	if v.state == window.StateRest || v.state == window.StateFan {
+		v.statusOpenedFrom = v.state
+	}
 	v.mu.Unlock()
 	v.SetState(window.StateExpanded)
 }
@@ -870,8 +892,12 @@ func (v *AppView) OpenStatus() {
 func (v *AppView) CloseStatus() {
 	v.mu.Lock()
 	v.showStatus = false
+	targetState := v.statusOpenedFrom
+	if targetState != window.StateRest && targetState != window.StateFan {
+		targetState = window.StateFan
+	}
 	v.mu.Unlock()
-	v.SetState(window.StateFan)
+	v.SetState(targetState)
 }
 
 func (v *AppView) ToggleStatus() {
@@ -879,13 +905,20 @@ func (v *AppView) ToggleStatus() {
 	v.showStatus = !v.showStatus
 	if v.showStatus {
 		v.showSettings = false
+		if v.state == window.StateRest || v.state == window.StateFan {
+			v.statusOpenedFrom = v.state
+		}
 	}
 	st := v.showStatus
+	targetState := v.statusOpenedFrom
+	if targetState != window.StateRest && targetState != window.StateFan {
+		targetState = window.StateFan
+	}
 	v.mu.Unlock()
 	if st {
 		v.SetState(window.StateExpanded)
 	} else {
-		v.SetState(window.StateFan)
+		v.SetState(targetState)
 	}
 }
 
@@ -1549,88 +1582,90 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		activeKey = s.issues[s.activeIdx].Key
 	}
 
-	canvas.PushClip(geometry.NewRect(tabStartX-2, tabMinY, tabBarWidth-4, tabMaxY-tabMinY))
-	for i, iss := range s.filteredIssues {
-		tabY := tabStartY + float32(i)*(tabHeight+tabGap)
+	if !s.showStatus {
+		canvas.PushClip(geometry.NewRect(tabStartX-2, tabMinY, tabBarWidth-4, tabMaxY-tabMinY))
+		for i, iss := range s.filteredIssues {
+			tabY := tabStartY + float32(i)*(tabHeight+tabGap)
 
-		if tabY < tabMinY-2 || tabY+tabHeight > tabMaxY+2 {
-			continue
-		}
-
-		tabTheme := GetTicketTheme(i)
-		isActive := (iss.Key == activeKey && !s.showSettings)
-		isHovered := (i == s.hoveredTabIdx)
-		tabWidth := tabBarWidth - 14
-		tabX := tabStartX + 2
-		if isActive {
-			tabX = tabStartX
-			tabWidth = tabBarWidth - 10
-		}
-
-		tabRect := geometry.NewRect(tabX, tabY, tabWidth, tabHeight)
-
-		canvas.DrawRoundRect(tabRect, tabTheme.Background, 8)
-		if isActive {
-			canvas.StrokeRoundRect(tabRect, widget.RGBA8(255, 255, 255, 240), 8, 1.5)
-			pillX := tabX + tabWidth - 5
-			if s.dockSide == window.DockSideLeft {
-				pillX = tabX + 2
+			if tabY < tabMinY-2 || tabY+tabHeight > tabMaxY+2 {
+				continue
 			}
-			canvas.DrawRoundRect(geometry.NewRect(pillX, tabY+8, 3, tabHeight-16), tabTheme.Foreground, 1.5)
-		} else if isHovered {
-			canvas.StrokeRoundRect(tabRect, widget.RGBA8(255, 255, 255, 200), 8, 1.2)
-		} else {
-			canvas.StrokeRoundRect(tabRect, tabTheme.Border, 8, 1.0)
-		}
 
-		// Line 1: Tab Key (11pt bold)
-		keyRect := geometry.NewRect(tabX+2, tabY+6, tabWidth-4, 15)
-		canvas.DrawText(iss.Key, keyRect, 11, tabTheme.Foreground, true, widget.TextAlignCenter)
+			tabTheme := GetTicketTheme(i)
+			isActive := (iss.Key == activeKey && !s.showSettings)
+			isHovered := (i == s.hoveredTabIdx)
+			tabWidth := tabBarWidth - 14
+			tabX := tabStartX + 2
+			if isActive {
+				tabX = tabStartX
+				tabWidth = tabBarWidth - 10
+			}
 
-		// Line 2: Tab Summary (9pt regular, truncated)
-		summaryText := truncateSummary(iss.Summary, 17)
-		summaryRect := geometry.NewRect(tabX+3, tabY+23, tabWidth-6, 15)
-		summaryColor := tabTheme.Secondary
-		if isActive || isHovered {
-			summaryColor = widget.RGBA8(255, 255, 255, 255)
-		}
-		canvas.DrawText(summaryText, summaryRect, 9, summaryColor, isActive || isHovered, widget.TextAlignCenter)
+			tabRect := geometry.NewRect(tabX, tabY, tabWidth, tabHeight)
 
-		// Line 3: Tab Status (8pt regular)
-		shortStatus := iss.Status.Name
-		statusRunes := []rune(iss.Status.Name)
-		if len(statusRunes) > 13 {
-			shortStatus = string(statusRunes[:13])
-		}
-		statusRect := geometry.NewRect(tabX+2, tabY+43, tabWidth-4, 14)
-		secColor := tabTheme.Secondary
-		if isActive || isHovered {
-			secColor = widget.RGBA8(255, 255, 255, 255)
-		}
-		canvas.DrawText(shortStatus, statusRect, 8, secColor, false, widget.TextAlignCenter)
-	}
-	canvas.PopClip()
+			canvas.DrawRoundRect(tabRect, tabTheme.Background, 8)
+			if isActive {
+				canvas.StrokeRoundRect(tabRect, widget.RGBA8(255, 255, 255, 240), 8, 1.5)
+				pillX := tabX + tabWidth - 5
+				if s.dockSide == window.DockSideLeft {
+					pillX = tabX + 2
+				}
+				canvas.DrawRoundRect(geometry.NewRect(pillX, tabY+8, 3, tabHeight-16), tabTheme.Foreground, 1.5)
+			} else if isHovered {
+				canvas.StrokeRoundRect(tabRect, widget.RGBA8(255, 255, 255, 200), 8, 1.2)
+			} else {
+				canvas.StrokeRoundRect(tabRect, tabTheme.Border, 8, 1.0)
+			}
 
-	// Scroll Indicator in Expanded Rail
-	totalRailH := float32(len(s.filteredIssues)) * (tabHeight + tabGap)
-	viewRailH := tabMaxY - tabMinY
-	if totalRailH > viewRailH && totalRailH > 0 {
-		maxScroll := totalRailH - viewRailH
-		scrollRatio := s.scrollY / maxScroll
-		if scrollRatio < 0 {
-			scrollRatio = 0
+			// Line 1: Tab Key (11pt bold)
+			keyRect := geometry.NewRect(tabX+2, tabY+6, tabWidth-4, 15)
+			canvas.DrawText(iss.Key, keyRect, 11, tabTheme.Foreground, true, widget.TextAlignCenter)
+
+			// Line 2: Tab Summary (9pt regular, truncated)
+			summaryText := truncateSummary(iss.Summary, 17)
+			summaryRect := geometry.NewRect(tabX+3, tabY+23, tabWidth-6, 15)
+			summaryColor := tabTheme.Secondary
+			if isActive || isHovered {
+				summaryColor = widget.RGBA8(255, 255, 255, 255)
+			}
+			canvas.DrawText(summaryText, summaryRect, 9, summaryColor, isActive || isHovered, widget.TextAlignCenter)
+
+			// Line 3: Tab Status (8pt regular)
+			shortStatus := iss.Status.Name
+			statusRunes := []rune(iss.Status.Name)
+			if len(statusRunes) > 13 {
+				shortStatus = string(statusRunes[:13])
+			}
+			statusRect := geometry.NewRect(tabX+2, tabY+43, tabWidth-4, 14)
+			secColor := tabTheme.Secondary
+			if isActive || isHovered {
+				secColor = widget.RGBA8(255, 255, 255, 255)
+			}
+			canvas.DrawText(shortStatus, statusRect, 8, secColor, false, widget.TextAlignCenter)
 		}
-		if scrollRatio > 1 {
-			scrollRatio = 1
+		canvas.PopClip()
+
+		// Scroll Indicator in Expanded Rail
+		totalRailH := float32(len(s.filteredIssues)) * (tabHeight + tabGap)
+		viewRailH := tabMaxY - tabMinY
+		if totalRailH > viewRailH && totalRailH > 0 {
+			maxScroll := totalRailH - viewRailH
+			scrollRatio := s.scrollY / maxScroll
+			if scrollRatio < 0 {
+				scrollRatio = 0
+			}
+			if scrollRatio > 1 {
+				scrollRatio = 1
+			}
+			thumbH := float32(28)
+			thumbY := tabMinY + scrollRatio*(viewRailH-thumbH)
+			scrollThumbX := tabStartX + tabBarWidth - 8
+			if s.dockSide == window.DockSideLeft {
+				scrollThumbX = tabStartX + 2
+			}
+			thumbRect := geometry.NewRect(scrollThumbX, thumbY, 3, thumbH)
+			canvas.DrawRoundRect(thumbRect, widget.RGBA8(255, 255, 255, 150), 1.5)
 		}
-		thumbH := float32(28)
-		thumbY := tabMinY + scrollRatio*(viewRailH-thumbH)
-		scrollThumbX := tabStartX + tabBarWidth - 8
-		if s.dockSide == window.DockSideLeft {
-			scrollThumbX = tabStartX + 2
-		}
-		thumbRect := geometry.NewRect(scrollThumbX, thumbY, 3, thumbH)
-		canvas.DrawRoundRect(thumbRect, widget.RGBA8(255, 255, 255, 150), 1.5)
 	}
 
 	// Dock Divider Line
@@ -2476,6 +2511,7 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 		prevHoverSet := v.hoveredSettings
 		prevHoverStat := v.hoveredStatus
 		dockSide := v.dockSide
+		showStatus := v.showStatus
 		v.mu.Unlock()
 
 		newHoverTab := -1
@@ -2498,7 +2534,7 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 		settingsTabRect := geometry.NewRect(tabStartX+2, b.Min.Y+h-48, tabBarWidth-14, 34)
 		if settingsTabRect.Contains(pos) {
 			newHoverSet = true
-		} else if !newHoverStat {
+		} else if !newHoverStat && !showStatus {
 			filtered := v.getFilteredIssues()
 			tabMinY := b.Min.Y + float32(44)
 			tabMaxY := b.Min.Y + h - float32(56)
@@ -2706,16 +2742,28 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		}
 		closeBtnRect := geometry.NewRect(tabStartX+tabBarWidth-34, b.Min.Y+12, 28, 22)
 		if closeBtnRect.Contains(pos) {
-			v.CloseStatus()
-			v.CloseSettings()
+			if showStatus {
+				v.CloseStatus()
+				return true
+			}
+			if showSettings {
+				v.CloseSettings()
+				return true
+			}
 			v.SetState(window.StateFan)
 			return true
 		}
 	} else {
 		closeBtnRect := geometry.NewRect(tabStartX+(tabBarWidth-36)/2, b.Min.Y+12, 36, 22)
 		if closeBtnRect.Contains(pos) {
-			v.CloseStatus()
-			v.CloseSettings()
+			if showStatus {
+				v.CloseStatus()
+				return true
+			}
+			if showSettings {
+				v.CloseSettings()
+				return true
+			}
 			v.SetState(window.StateFan)
 			return true
 		}
@@ -2727,31 +2775,33 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		return true
 	}
 
-	tabMinY := b.Min.Y + float32(44)
-	tabMaxY := b.Min.Y + h - float32(56)
-	tabStartY := tabMinY - scrollY
-	tabHeight := float32(64)
-	tabGap := float32(7)
+	if !showStatus {
+		tabMinY := b.Min.Y + float32(44)
+		tabMaxY := b.Min.Y + h - float32(56)
+		tabStartY := tabMinY - scrollY
+		tabHeight := float32(64)
+		tabGap := float32(7)
 
-	for i, iss := range filteredIssues {
-		tabY := tabStartY + float32(i)*(tabHeight+tabGap)
-		if tabY < tabMinY-2 || tabY+tabHeight > tabMaxY+2 {
-			continue
-		}
-		tabRect := geometry.NewRect(tabStartX, tabY, tabBarWidth-4, tabHeight)
-		if tabRect.Contains(pos) {
-			for origIdx, oIss := range allIssues {
-				if oIss.Key == iss.Key {
-					if activeIdx == origIdx && !showSettings && !showStatus {
-						v.SetState(window.StateFan)
+		for i, iss := range filteredIssues {
+			tabY := tabStartY + float32(i)*(tabHeight+tabGap)
+			if tabY < tabMinY-2 || tabY+tabHeight > tabMaxY+2 {
+				continue
+			}
+			tabRect := geometry.NewRect(tabStartX, tabY, tabBarWidth-4, tabHeight)
+			if tabRect.Contains(pos) {
+				for origIdx, oIss := range allIssues {
+					if oIss.Key == iss.Key {
+						if activeIdx == origIdx && !showSettings && !showStatus {
+							v.SetState(window.StateFan)
+							return true
+						}
+						v.Expand(origIdx)
 						return true
 					}
-					v.Expand(origIdx)
-					return true
 				}
+				v.Expand(i)
+				return true
 			}
-			v.Expand(i)
-			return true
 		}
 	}
 
@@ -3160,6 +3210,17 @@ func (v *AppView) handleKey(ev *event.KeyEvent) bool {
 		}
 
 		if st == window.StateExpanded {
+			if v.IsStatusOpen() {
+				v.CloseStatus()
+				return true
+			}
+			v.mu.Lock()
+			showSet := v.showSettings
+			v.mu.Unlock()
+			if showSet {
+				v.CloseSettings()
+				return true
+			}
 			v.SetState(window.StateFan)
 			return true
 		} else if st == window.StateFan {
@@ -3172,6 +3233,7 @@ func (v *AppView) handleKey(ev *event.KeyEvent) bool {
 	v.mu.Lock()
 	st := v.state
 	showSettings := v.showSettings
+	showStatus := v.showStatus
 	activeField := v.activeField
 	v.mu.Unlock()
 
@@ -3199,8 +3261,8 @@ func (v *AppView) handleKey(ev *event.KeyEvent) bool {
 		return true
 	}
 
-	// Active ticket actions (when not editing settings)
-	if !showSettings && (st == window.StateFan || st == window.StateExpanded) {
+	// Active ticket actions (when not editing settings or viewing status)
+	if !showSettings && !showStatus && (st == window.StateFan || st == window.StateExpanded) {
 		filtered := v.getFilteredIssues()
 
 		// Arrow Up navigation
