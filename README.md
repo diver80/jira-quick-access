@@ -4,7 +4,7 @@ Jira tickets that live at the edge of your screen. A high-performance native des
 
 No dock clutter, no window to manage. Slide the pointer to the right edge and the deck fans out.
 
-📥 **[Download for macOS (.dmg Installer)](dist/osx/Jira%20Quick%20Access-v1.0.0-macOS-Universal.dmg)** · **[macOS App Bundle & Assets](dist/osx/)** · 📖 **[Fachlicher & Technischer Hintergrund (Deutsch)](docs/HINTERGRUND.md)**
+📥 **[Download for macOS (.dmg Installer)](dist/osx/Jira%20Quick%20Access-v1.0.5-macOS-Universal.dmg)** · **[macOS App Bundle & Assets](dist/osx/)** · 📖 **[Fachlicher & Technischer Hintergrund (Deutsch)](docs/HINTERGRUND.md)**
 
 > [!NOTE]
 > **Platform Support**: Currently, **only the macOS (Darwin) version is actively tested and verified** (with native Cocoa edge docking, Retina multi-resolution icons, and embedded WebKit). Windows and Linux builds are experimental cross-compilations and not yet thoroughly tested.
@@ -107,13 +107,13 @@ The bundled `build.sh` script automates cross-compilation, icon packaging, and d
 
 Generated artifacts are placed in `dist/`:
 - `dist/osx/Jira Quick Access.app` (macOS Universal 2 App Bundle with Retina `AppIcon.icns`)
-- `dist/osx/Jira Quick Access-v1.0.0-macOS-Universal.dmg` (Drag-and-Drop Disk Image Installer)
+- `dist/osx/Jira Quick Access-v1.0.5-macOS-Universal.dmg` (Drag-and-Drop Disk Image Installer)
 - `dist/win/jira-quick-access-windows-amd64.exe`
 - `dist/lin/jira-quick-access-linux-amd64`
 
 ### 🍎 How to Install & Launch on macOS:
 1. **Automated (Fastest)**: Run `./build.sh install`. This copies the app into `/Applications/`, clears quarantine flags, and makes it available system-wide in Spotlight and Launchpad.
-2. **Standard macOS DMG**: Open the [Jira Quick Access DMG Installer](dist/osx/Jira%20Quick%20Access-v1.0.0-macOS-Universal.dmg) in Finder and drag the **Jira Quick Access** icon onto the **Applications** folder shortcut.
+2. **Standard macOS DMG**: Open the [Jira Quick Access DMG Installer](dist/osx/Jira%20Quick%20Access-v1.0.5-macOS-Universal.dmg) in Finder and drag the **Jira Quick Access** icon onto the **Applications** folder shortcut.
 3. **Launch**: Press `⌘ + Space`, type `Jira Quick Access`, and hit `Enter`.
 4. **Launch at Login (Optional)**: Open **macOS System Settings** -> **General** -> **Login Items** -> Click `+` and select `Jira Quick Access` from `/Applications`.
 
