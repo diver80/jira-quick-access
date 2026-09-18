@@ -1042,6 +1042,26 @@ func truncateSummary(text string, maxLen int) string {
 	return string(runes[:maxLen-1]) + "…"
 }
 
+func getStatusBadgeInfo(ind status.Indicator) (icon string, text string, fg widget.Color, bg widget.Color, border widget.Color) {
+	switch ind {
+	case status.IndicatorMinor, status.IndicatorMaintenance:
+		return "⚠", "Atlassian Notice",
+			widget.RGBA8(245, 158, 11, 255),
+			widget.RGBA8(56, 38, 16, 230),
+			widget.RGBA8(245, 158, 11, 180)
+	case status.IndicatorMajor, status.IndicatorCritical:
+		return "⚠", "Atlassian Outage",
+			widget.RGBA8(239, 68, 68, 255),
+			widget.RGBA8(65, 24, 26, 240),
+			widget.RGBA8(239, 68, 68, 200)
+	default:
+		return "✓", "Atlassian Cloud OK",
+			widget.RGBA8(34, 197, 94, 255),
+			widget.RGBA8(20, 48, 34, 230),
+			widget.RGBA8(34, 197, 94, 160)
+	}
+}
+
 func getStatusIndicatorColors(ind status.Indicator) (widget.Color, widget.Color) {
 	switch ind {
 	case status.IndicatorMinor, status.IndicatorMaintenance:
@@ -1076,26 +1096,36 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 
 		// 3. Subtle top drag handle grip dots (···)
 		centerX := b.Min.X + w/2
-		canvas.DrawCircle(geometry.Pt(centerX-4, b.Min.Y+4.5), 1.0, widget.RGBA8(255, 255, 255, 100))
-		canvas.DrawCircle(geometry.Pt(centerX, b.Min.Y+4.5), 1.0, widget.RGBA8(255, 255, 255, 100))
-		canvas.DrawCircle(geometry.Pt(centerX+4, b.Min.Y+4.5), 1.0, widget.RGBA8(255, 255, 255, 100))
+		canvas.DrawCircle(geometry.Pt(centerX-4, b.Min.Y+4.0), 1.0, widget.RGBA8(255, 255, 255, 100))
+		canvas.DrawCircle(geometry.Pt(centerX, b.Min.Y+4.0), 1.0, widget.RGBA8(255, 255, 255, 100))
+		canvas.DrawCircle(geometry.Pt(centerX+4, b.Min.Y+4.0), 1.0, widget.RGBA8(255, 255, 255, 100))
 
-		// 4. Top Status Beacon Indicator (Atlassian Status Health)
+		topOffset := float32(6)
+		bottomOffset := float32(31)
+
+		// 4. Top Global Status Badge (Distinct icon badge, non-instance specific)
 		if s.config.StatusCheckEnabled {
-			statCol, statGlow := getStatusIndicatorColors(s.statusReport.OverallIndicator)
-			beaconCenter := geometry.Pt(centerX, b.Min.Y+14)
-			canvas.DrawCircle(beaconCenter, 6.0, statGlow)
-			canvas.DrawCircle(beaconCenter, 3.5, statCol)
+			topOffset = 31
+			icon, _, fg, bg, border := getStatusBadgeInfo(s.statusReport.OverallIndicator)
+			statBadgeRect := geometry.NewRect(centerX-12, b.Min.Y+7, 24, 18)
+			canvas.DrawRoundRect(statBadgeRect, bg, 5)
+			bCol := border
 			if s.hoveredStatus {
-				canvas.StrokeCircle(beaconCenter, 7.5, widget.RGBA8(255, 255, 255, 180), 1.2)
+				bCol = widget.RGBA8(255, 255, 255, 220)
 			}
+			canvas.StrokeRoundRect(statBadgeRect, bCol, 5, 1.0)
+			canvas.DrawText(icon, statBadgeRect, 11, fg, true, widget.TextAlignCenter)
+
+			// Top Divider Line below global status
+			topDividerY := b.Min.Y + 29
+			canvas.DrawLine(geometry.Pt(b.Min.X+7, topDividerY), geometry.Pt(b.Min.X+w-7, topDividerY), widget.RGBA8(255, 255, 255, 45), 1.0)
 		}
 
 		instCount := len(s.instances)
 		if instCount == 0 {
 			instCount = 1
 		}
-		usableH := h - 48 // Reserve 24px top for status beacon and 24px bottom for settings
+		usableH := h - topOffset - bottomOffset
 		instSectionH := usableH / float32(instCount)
 
 		// Calculate maxCount across instances to scale proportions (e.g. 23)
@@ -1113,7 +1143,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		}
 
 		for idx, inst := range s.instances {
-			secY := b.Min.Y + float32(22+float32(idx)*instSectionH)
+			secY := b.Min.Y + topOffset + 2 + float32(idx)*instSectionH
 
 			var instIssues []jira.Issue
 			for _, iss := range s.issues {
@@ -1205,14 +1235,21 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			}
 		}
 
-		// Divider before settings
-		dividerY := b.Min.Y + h - 28
-		canvas.DrawLine(geometry.Pt(b.Min.X+7, dividerY), geometry.Pt(b.Min.X+w-7, dividerY), widget.RGBA8(255, 255, 255, 45), 1.0)
+		// Bottom Divider Line above settings
+		bottomDividerY := b.Min.Y + h - 29
+		canvas.DrawLine(geometry.Pt(b.Min.X+7, bottomDividerY), geometry.Pt(b.Min.X+w-7, bottomDividerY), widget.RGBA8(255, 255, 255, 45), 1.0)
 
-		// Settings Cog Icon
-		settingsCenter := geometry.Pt(centerX, b.Min.Y+h-14)
-		canvas.DrawCircle(settingsCenter, 6.5, widget.RGBA8(180, 200, 230, 45))
-		canvas.DrawCircle(settingsCenter, 3.8, widget.RGBA8(200, 220, 245, 240))
+		// Settings Gear Icon Badge (Distinct icon badge, non-instance specific)
+		setBg := widget.RGBA8(36, 46, 66, 230)
+		setBorder := widget.RGBA8(255, 255, 255, 45)
+		if s.hoveredSettings {
+			setBg = widget.RGBA8(52, 68, 96, 245)
+			setBorder = widget.RGBA8(255, 255, 255, 200)
+		}
+		setRect := geometry.NewRect(centerX-12, b.Min.Y+h-25, 24, 18)
+		canvas.DrawRoundRect(setRect, setBg, 5)
+		canvas.StrokeRoundRect(setRect, setBorder, 5, 1.0)
+		canvas.DrawText("⚙", setRect, 11, widget.RGBA8(220, 235, 255, 240), true, widget.TextAlignCenter)
 		return
 	}
 
@@ -1228,7 +1265,36 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		dragBarRect := geometry.NewRect(b.Min.X+w/2-14, b.Min.Y+3, 28, 3)
 		canvas.DrawRoundRect(dragBarRect, widget.RGBA8(255, 255, 255, 90), 1.5)
 
-		// 2. Top Instance Header Pill
+		// 2. Global Status Tab (when enabled)
+		instHeaderY := b.Min.Y + 8
+		searchY := b.Min.Y + 34
+		tabMinY := b.Min.Y + float32(60)
+
+		if s.config.StatusCheckEnabled {
+			icon, text, fg, bg, border := getStatusBadgeInfo(s.statusReport.OverallIndicator)
+			statusTabRect := geometry.NewRect(b.Min.X+7, b.Min.Y+8, w-14, 24)
+			stBg := bg
+			stBorder := border
+			if s.showStatus {
+				stBg = widget.RGBA8(46, 62, 92, 255)
+				stBorder = widget.RGBA8(255, 255, 255, 220)
+			} else if s.hoveredStatus {
+				stBorder = widget.RGBA8(255, 255, 255, 200)
+			}
+			canvas.DrawRoundRect(statusTabRect, stBg, 6)
+			canvas.StrokeRoundRect(statusTabRect, stBorder, 6, 1.0)
+			canvas.DrawText(icon+" "+text, statusTabRect, 9, fg, true, widget.TextAlignCenter)
+
+			// Divider line below status
+			topDividerY := b.Min.Y + 36
+			canvas.DrawLine(geometry.Pt(b.Min.X+10, topDividerY), geometry.Pt(b.Min.X+w-10, topDividerY), widget.RGBA8(255, 255, 255, 45), 1.0)
+
+			instHeaderY = b.Min.Y + 40
+			searchY = b.Min.Y + 66
+			tabMinY = b.Min.Y + float32(92)
+		}
+
+		// 3. Top Instance Header Pill
 		instName := "All Instances"
 		instBeaconColor := widget.RGBA8(56, 189, 248, 240)
 		if s.activeInstIdx >= 0 && s.activeInstIdx < len(s.instances) {
@@ -1236,30 +1302,23 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			instName = inst.Name
 			instBeaconColor, _, _, _, _, _, _ = GetInstanceColors(inst.Color, s.activeInstIdx)
 		}
-		if len(instName) > 14 {
-			instName = instName[:12] + ".."
+		if len(instName) > 12 {
+			instName = instName[:10] + ".."
 		}
 
-		instHeaderRect := geometry.NewRect(b.Min.X+7, b.Min.Y+8, w-14, 22)
+		instHeaderRect := geometry.NewRect(b.Min.X+7, instHeaderY, w-14, 22)
 		canvas.DrawRoundRect(instHeaderRect, widget.RGBA8(34, 44, 66, 225), 5)
 		canvas.StrokeRoundRect(instHeaderRect, widget.RGBA8(255, 255, 255, 40), 5, 1.0)
 
-		canvas.DrawCircle(geometry.Pt(b.Min.X+16, b.Min.Y+19), 3.5, instBeaconColor)
-		canvas.DrawText(instName, geometry.NewRect(b.Min.X+26, b.Min.Y+12, w-52, 14), 10, widget.RGBA8(235, 245, 255, 255), true, widget.TextAlignCenter)
-
-		// Top right status dot in Fan header
-		if s.config.StatusCheckEnabled {
-			statCol, statGlow := getStatusIndicatorColors(s.statusReport.OverallIndicator)
-			statCenter := geometry.Pt(b.Min.X+w-18, b.Min.Y+19)
-			canvas.DrawCircle(statCenter, 5.5, statGlow)
-			canvas.DrawCircle(statCenter, 3.5, statCol)
-			if s.hoveredStatus {
-				canvas.StrokeCircle(statCenter, 6.5, widget.RGBA8(255, 255, 255, 180), 1.0)
-			}
+		canvas.DrawCircle(geometry.Pt(b.Min.X+16, instHeaderY+11), 3.5, instBeaconColor)
+		labelRect := geometry.NewRect(b.Min.X+24, instHeaderY+4, w-46, 14)
+		canvas.DrawText(instName, labelRect, 10, widget.RGBA8(235, 245, 255, 255), true, widget.TextAlignCenter)
+		if len(s.instances) > 1 {
+			canvas.DrawText("▾", geometry.NewRect(b.Min.X+w-20, instHeaderY+4, 12, 14), 9, widget.RGBA8(180, 200, 230, 200), false, widget.TextAlignCenter)
 		}
 
-		// 3. Search Bar with Clear Button & Blinking Cursor
-		searchRect := geometry.NewRect(b.Min.X+7, b.Min.Y+34, w-14, 22)
+		// 4. Search Bar with Clear Button & Blinking Cursor
+		searchRect := geometry.NewRect(b.Min.X+7, searchY, w-14, 22)
 		searchBg := widget.RGBA8(14, 20, 30, 220)
 		searchBorder := widget.RGBA8(255, 255, 255, 35)
 		if s.searchActive || s.searchQuery != "" {
@@ -1275,7 +1334,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			searchTxt = "Search..."
 			searchColor = widget.RGBA8(140, 155, 180, 255)
 		}
-		sTxtRect := geometry.NewRect(b.Min.X+12, b.Min.Y+38, w-38, 14)
+		sTxtRect := geometry.NewRect(b.Min.X+12, searchY+4, w-38, 14)
 		canvas.DrawText(searchTxt, sTxtRect, 9, searchColor, false, widget.TextAlignLeft)
 
 		// Blinking search cursor
@@ -1283,19 +1342,18 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			curOffset := measureTextWidth(s.searchQuery, 9)
 			curX := b.Min.X + 12 + curOffset + 1.0
 			if curX < b.Min.X+w-28 {
-				canvas.DrawLine(geometry.Pt(curX, b.Min.Y+37), geometry.Pt(curX, b.Min.Y+51), widget.RGBA8(255, 255, 255, 220), 1.5)
+				canvas.DrawLine(geometry.Pt(curX, searchY+3), geometry.Pt(curX, searchY+17), widget.RGBA8(255, 255, 255, 220), 1.5)
 			}
 		}
 
 		// Clear search "✕" button
 		if s.searchQuery != "" {
-			clearBtnRect := geometry.NewRect(b.Min.X+w-24, b.Min.Y+38, 14, 14)
-			canvas.DrawCircle(geometry.Pt(b.Min.X+w-17, b.Min.Y+45), 6.5, widget.RGBA8(255, 255, 255, 40))
+			clearBtnRect := geometry.NewRect(b.Min.X+w-24, searchY+4, 14, 14)
+			canvas.DrawCircle(geometry.Pt(b.Min.X+w-17, searchY+11), 6.5, widget.RGBA8(255, 255, 255, 40))
 			canvas.DrawText("✕", clearBtnRect, 8, widget.RGBA8(255, 255, 255, 220), true, widget.TextAlignCenter)
 		}
 
-		// 4. Tab Area (Smoothly clipped between top search and bottom settings tab)
-		tabMinY := b.Min.Y + float32(60)
+		// 5. Tab Area (Smoothly clipped between top search and bottom settings tab)
 		tabMaxY := b.Min.Y + h - float32(50)
 		tabStartY := tabMinY - s.scrollY
 		tabHeight := float32(62)
@@ -1303,7 +1361,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 
 		canvas.PushClip(geometry.NewRect(b.Min.X+1, tabMinY, w-2, tabMaxY-tabMinY))
 		if len(s.filteredIssues) == 0 {
-			noRect := geometry.NewRect(b.Min.X+8, b.Min.Y+74, w-16, 30)
+			noRect := geometry.NewRect(b.Min.X+8, tabMinY+14, w-16, 30)
 			canvas.DrawText("No tickets", noRect, 10, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignCenter)
 		} else {
 			for i, iss := range s.filteredIssues {
@@ -1373,7 +1431,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		}
 		canvas.PopClip()
 
-		// 5. Scroll Indicator
+		// 6. Scroll Indicator
 		totalTabH := float32(len(s.filteredIssues)) * (tabHeight + tabGap)
 		viewTabH := tabMaxY - tabMinY
 		if totalTabH > viewTabH && totalTabH > 0 {
@@ -1391,11 +1449,11 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			canvas.DrawRoundRect(thumbRect, widget.RGBA8(255, 255, 255, 140), 1.5)
 		}
 
-		// 6. Divider Line before Settings
+		// 7. Divider Line before Settings
 		dividerY := b.Min.Y + h - 50
 		canvas.DrawLine(geometry.Pt(b.Min.X+10, dividerY), geometry.Pt(b.Min.X+w-10, dividerY), widget.RGBA8(255, 255, 255, 55), 1.0)
 
-		// 7. Settings Tab
+		// 8. Settings Tab
 		settingsTabY := b.Min.Y + h - 42
 		setX := b.Min.X + 7
 		setW := w - 14
@@ -1411,7 +1469,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		canvas.DrawRoundRect(settingsTabRect, setBg, 8)
 		canvas.StrokeRoundRect(settingsTabRect, setBorder, 8, 1.0)
 		setTxtRect := geometry.NewRect(setX+2, settingsTabY+9, setW-4, 16)
-		canvas.DrawText("Settings", setTxtRect, 10, widget.RGBA8(230, 240, 255, 255), true, widget.TextAlignCenter)
+		canvas.DrawText("⚙ Settings", setTxtRect, 10, widget.RGBA8(230, 240, 255, 255), true, widget.TextAlignCenter)
 		return
 	}
 
@@ -1432,34 +1490,39 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	canvas.DrawRoundRect(dockShelfRect, widget.RGBA8(20, 28, 44, 175), 12)
 	canvas.StrokeRoundRect(dockShelfRect, widget.RGBA8(255, 255, 255, 80), 12, 1.5)
 
-	// Top native close button on the dock shelf (100% fail-safe outside WebKit)
-	closeBtnRect := geometry.NewRect(tabStartX+(tabBarWidth-32)/2, b.Min.Y+12, 32, 22)
-	canvas.DrawRoundRect(closeBtnRect, widget.RGBA8(28, 38, 58, 240), 6)
-	canvas.StrokeRoundRect(closeBtnRect, widget.RGBA8(255, 255, 255, 140), 6, 1.0)
-	canvas.DrawText("✕", closeBtnRect, 10, widget.RGBA8(255, 255, 255, 240), true, widget.TextAlignCenter)
-
-	// Top status indicator button on the dock shelf
+	// Top controls on the dock shelf: Global Status Button & Native Close Button
 	if s.config.StatusCheckEnabled {
-		statusBtnRect := geometry.NewRect(tabStartX+8, b.Min.Y+12, 24, 22)
-		statusBg := widget.RGBA8(28, 38, 58, 240)
-		statusBorder := widget.RGBA8(255, 255, 255, 80)
+		icon, _, fg, bg, border := getStatusBadgeInfo(s.statusReport.OverallIndicator)
+		statusBtnRect := geometry.NewRect(tabStartX+6, b.Min.Y+12, tabBarWidth-44, 22)
+		stBg := bg
+		stBorder := border
 		if s.showStatus {
-			statusBg = widget.RGBA8(46, 62, 92, 255)
-			statusBorder = widget.RGBA8(255, 255, 255, 220)
+			stBg = widget.RGBA8(46, 62, 92, 255)
+			stBorder = widget.RGBA8(255, 255, 255, 220)
 		} else if s.hoveredStatus {
-			statusBorder = widget.RGBA8(255, 255, 255, 180)
+			stBorder = widget.RGBA8(255, 255, 255, 180)
 		}
-		canvas.DrawRoundRect(statusBtnRect, statusBg, 6)
-		canvas.StrokeRoundRect(statusBtnRect, statusBorder, 6, 1.0)
+		canvas.DrawRoundRect(statusBtnRect, stBg, 6)
+		canvas.StrokeRoundRect(statusBtnRect, stBorder, 6, 1.0)
+		canvas.DrawText(icon+" Status", statusBtnRect, 9, fg, true, widget.TextAlignCenter)
 
-		statCol, statGlow := getStatusIndicatorColors(s.statusReport.OverallIndicator)
-		sDot := geometry.Pt(statusBtnRect.Min.X+12, statusBtnRect.Min.Y+11)
-		canvas.DrawCircle(sDot, 5.0, statGlow)
-		canvas.DrawCircle(sDot, 3.5, statCol)
+		closeBtnRect := geometry.NewRect(tabStartX+tabBarWidth-34, b.Min.Y+12, 28, 22)
+		canvas.DrawRoundRect(closeBtnRect, widget.RGBA8(28, 38, 58, 240), 6)
+		canvas.StrokeRoundRect(closeBtnRect, widget.RGBA8(255, 255, 255, 140), 6, 1.0)
+		canvas.DrawText("✕", closeBtnRect, 10, widget.RGBA8(255, 255, 255, 240), true, widget.TextAlignCenter)
+	} else {
+		closeBtnRect := geometry.NewRect(tabStartX+(tabBarWidth-36)/2, b.Min.Y+12, 36, 22)
+		canvas.DrawRoundRect(closeBtnRect, widget.RGBA8(28, 38, 58, 240), 6)
+		canvas.StrokeRoundRect(closeBtnRect, widget.RGBA8(255, 255, 255, 140), 6, 1.0)
+		canvas.DrawText("✕", closeBtnRect, 10, widget.RGBA8(255, 255, 255, 240), true, widget.TextAlignCenter)
 	}
 
+	// Divider line below top dock controls
+	topDividerY := b.Min.Y + 38
+	canvas.DrawLine(geometry.Pt(tabStartX+8, topDividerY), geometry.Pt(tabStartX+tabBarWidth-12, topDividerY), widget.RGBA8(255, 255, 255, 45), 1.0)
+
 	// Draw side tabs inside the dock shelf with strict bounds clipping
-	tabMinY := b.Min.Y + float32(40)
+	tabMinY := b.Min.Y + float32(44)
 	tabMaxY := b.Min.Y + h - float32(56)
 	tabStartY := tabMinY - s.scrollY
 	tabHeight := float32(64)
@@ -1568,7 +1631,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	canvas.DrawRoundRect(settingsTabRect, settingsBg, 8)
 	canvas.StrokeRoundRect(settingsTabRect, widget.RGBA8(255, 255, 255, 45), 8, 1.0)
 	setTxtRect := geometry.NewRect(tabStartX+4, settingsTabY+9, tabBarWidth-18, 16)
-	canvas.DrawText("Settings", setTxtRect, 10, widget.RGBA8(230, 240, 255, 255), true, widget.TextAlignCenter)
+	canvas.DrawText("⚙ Settings", setTxtRect, 10, widget.RGBA8(230, 240, 255, 255), true, widget.TextAlignCenter)
 
 	// Overlays (if active)
 	if s.showStatus {
@@ -2244,6 +2307,7 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 	v.mu.Lock()
 	st := v.state
 	instCount := len(v.config.Instances)
+	statusEnabled := v.config.StatusCheckEnabled
 	scrollY := v.scrollY
 	v.mu.Unlock()
 
@@ -2252,7 +2316,7 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 	h := float32(expH)
 	b := geometry.NewRect(0, 0, w, h)
 
-	// REST STATE: Hovering specific instance or settings dot
+	// REST STATE: Hovering specific instance, status badge, or settings badge
 	if st == window.StateRest {
 		v.mu.Lock()
 		autoH := v.autoHide
@@ -2262,14 +2326,40 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 			v.setTucked(false)
 		}
 
+		if statusEnabled && pos.Y >= b.Min.Y+6 && pos.Y <= b.Min.Y+28 {
+			v.mu.Lock()
+			v.hoveredStatus = true
+			v.hoveredSettings = false
+			v.mu.Unlock()
+			v.MarkNeedsLayout()
+			if v.onRedraw != nil {
+				v.onRedraw()
+			}
+			return true
+		}
+
 		if pos.Y >= b.Min.Y+h-28 {
 			v.mu.Lock()
 			v.hoveredSettings = true
+			v.hoveredStatus = false
 			v.mu.Unlock()
+			v.MarkNeedsLayout()
+			if v.onRedraw != nil {
+				v.onRedraw()
+			}
 			return true
 		}
 
 		v.mu.Lock()
+		if v.hoveredStatus || v.hoveredSettings {
+			v.hoveredStatus = false
+			v.hoveredSettings = false
+			v.MarkNeedsLayout()
+			if v.onRedraw != nil {
+				v.onRedraw()
+			}
+		}
+
 		if v.restHoverStart.IsZero() {
 			v.restHoverStart = time.Now()
 			v.mu.Unlock()
@@ -2281,10 +2371,15 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 		}
 		v.mu.Unlock()
 
+		topOffset := float32(6)
+		bottomOffset := float32(31)
+		if statusEnabled {
+			topOffset = float32(31)
+		}
 		if instCount > 0 {
-			usableH := h - 34
+			usableH := h - topOffset - bottomOffset
 			instSectionH := usableH / float32(instCount)
-			instIdx := int((pos.Y - (b.Min.Y + 6)) / instSectionH)
+			instIdx := int((pos.Y - (b.Min.Y + topOffset + 2)) / instSectionH)
 			if instIdx < 0 {
 				instIdx = 0
 			}
@@ -2303,27 +2398,34 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 		return true
 	}
 
-	// FAN STATE: Track hovered tab / settings button for interactive lift effect
+	// FAN STATE: Track hovered tab / settings button / status button for interactive lift effect
 	if st == window.StateFan {
 		v.mu.Lock()
 		v.lastHover = time.Now()
 		prevHoverTab := v.hoveredTabIdx
 		prevHoverSet := v.hoveredSettings
+		prevHoverStat := v.hoveredStatus
 		v.mu.Unlock()
 
 		newHoverTab := -1
 		newHoverSet := false
+		newHoverStat := false
 
-		if pos.Y >= b.Min.Y+h-44 {
+		if statusEnabled && pos.Y >= b.Min.Y+8 && pos.Y <= b.Min.Y+32 {
+			newHoverStat = true
+		} else if pos.Y >= b.Min.Y+h-44 {
 			newHoverSet = true
 		} else {
-			filtered := v.getFilteredIssues()
 			tabMinY := b.Min.Y + float32(60)
+			if statusEnabled {
+				tabMinY = b.Min.Y + float32(92)
+			}
 			tabMaxY := b.Min.Y + h - float32(50)
 			tabStartY := tabMinY - scrollY
 			tabHeight := float32(62)
 			tabGap := float32(6)
 
+			filtered := v.getFilteredIssues()
 			for i := range filtered {
 				tabY := tabStartY + float32(i)*(tabHeight+tabGap)
 				if tabY < tabMinY-2 || tabY+tabHeight > tabMaxY+2 {
@@ -2337,9 +2439,10 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 			}
 		}
 
-		if newHoverTab != prevHoverTab || newHoverSet != prevHoverSet {
+		if newHoverTab != prevHoverTab || newHoverSet != prevHoverSet || newHoverStat != prevHoverStat {
 			v.mu.Lock()
 			v.hoveredSettings = newHoverSet
+			v.hoveredStatus = newHoverStat
 			v.mu.Unlock()
 			v.setHoveredTab(newHoverTab)
 			v.MarkNeedsLayout()
@@ -2350,16 +2453,18 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 		return true
 	}
 
-	// EXPANDED STATE: Track hovered tab on the side dock shelf
+	// EXPANDED STATE: Track hovered tab / status / settings on the side dock shelf
 	if st == window.StateExpanded {
 		v.mu.Lock()
 		prevHoverTab := v.hoveredTabIdx
 		prevHoverSet := v.hoveredSettings
+		prevHoverStat := v.hoveredStatus
 		dockSide := v.dockSide
 		v.mu.Unlock()
 
 		newHoverTab := -1
 		newHoverSet := false
+		newHoverStat := false
 
 		tabBarWidth := float32(110)
 		tabStartX := b.Min.X + w - tabBarWidth
@@ -2367,12 +2472,19 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 			tabStartX = b.Min.X + 6
 		}
 
+		if statusEnabled {
+			statusBtnRect := geometry.NewRect(tabStartX+6, b.Min.Y+12, tabBarWidth-44, 22)
+			if statusBtnRect.Contains(pos) {
+				newHoverStat = true
+			}
+		}
+
 		settingsTabRect := geometry.NewRect(tabStartX+2, b.Min.Y+h-48, tabBarWidth-14, 34)
 		if settingsTabRect.Contains(pos) {
 			newHoverSet = true
-		} else {
+		} else if !newHoverStat {
 			filtered := v.getFilteredIssues()
-			tabMinY := b.Min.Y + float32(40)
+			tabMinY := b.Min.Y + float32(44)
 			tabMaxY := b.Min.Y + h - float32(56)
 			tabStartY := tabMinY - scrollY
 			tabHeight := float32(64)
@@ -2391,9 +2503,10 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 			}
 		}
 
-		if newHoverTab != prevHoverTab || newHoverSet != prevHoverSet {
+		if newHoverTab != prevHoverTab || newHoverSet != prevHoverSet || newHoverStat != prevHoverStat {
 			v.mu.Lock()
 			v.hoveredSettings = newHoverSet
+			v.hoveredStatus = newHoverStat
 			v.mu.Unlock()
 			v.setHoveredTab(newHoverTab)
 			v.MarkNeedsLayout()
@@ -2448,7 +2561,7 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 
 	// REST STATE: Click affordances
 	if st == window.StateRest {
-		if statusEnabled && pos.Y >= b.Min.Y+6 && pos.Y <= b.Min.Y+24 {
+		if statusEnabled && pos.Y >= b.Min.Y+6 && pos.Y <= b.Min.Y+28 {
 			v.ToggleStatus()
 			return true
 		}
@@ -2466,22 +2579,31 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 
 	// 1. Fan State Clicks
 	if st == window.StateFan {
-		// Top right status dot click in Fan
-		if statusEnabled && pos.X >= b.Min.X+w-28 && pos.Y >= b.Min.Y+6 && pos.Y <= b.Min.Y+30 {
+		// Top global status tab click in Fan
+		if statusEnabled && pos.Y >= b.Min.Y+8 && pos.Y <= b.Min.Y+32 {
 			v.ToggleStatus()
 			return true
 		}
 
-		if pos.Y <= b.Min.Y+12 {
+		if pos.Y <= b.Min.Y+6 {
 			v.StartDrag()
 			return true
+		}
+
+		instHeaderY := b.Min.Y + 8
+		searchY := b.Min.Y + 34
+		tabMinY := b.Min.Y + float32(60)
+		if statusEnabled {
+			instHeaderY = b.Min.Y + 40
+			searchY = b.Min.Y + 66
+			tabMinY = b.Min.Y + float32(92)
 		}
 
 		// Clear search "✕" button
 		v.mu.Lock()
 		sq := v.searchQuery
 		v.mu.Unlock()
-		if sq != "" && pos.X >= b.Min.X+w-28 && pos.X <= b.Min.X+w-6 && pos.Y >= b.Min.Y+34 && pos.Y <= b.Min.Y+56 {
+		if sq != "" && pos.X >= b.Min.X+w-28 && pos.X <= b.Min.X+w-6 && pos.Y >= searchY && pos.Y <= searchY+22 {
 			v.mu.Lock()
 			v.searchQuery = ""
 			v.searchActive = true
@@ -2493,7 +2615,7 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		}
 
 		// Click header to cycle instance filter
-		instHeaderRect := geometry.NewRect(b.Min.X+7, b.Min.Y+8, w-14, 22)
+		instHeaderRect := geometry.NewRect(b.Min.X+7, instHeaderY, w-14, 22)
 		v.mu.Lock()
 		instLen := len(v.config.Instances)
 		v.mu.Unlock()
@@ -2507,7 +2629,7 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 			return true
 		}
 
-		searchRect := geometry.NewRect(b.Min.X+7, b.Min.Y+34, w-14, 22)
+		searchRect := geometry.NewRect(b.Min.X+7, searchY, w-14, 22)
 		if searchRect.Contains(pos) {
 			v.mu.Lock()
 			v.searchActive = true
@@ -2522,7 +2644,6 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 			return true
 		}
 
-		tabMinY := b.Min.Y + float32(60)
 		tabMaxY := b.Min.Y + h - float32(50)
 		tabStartY := tabMinY - scrollY
 		tabHeight := float32(62)
@@ -2560,18 +2681,24 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		cardStartX = b.Min.X + tabBarWidth + 8
 	}
 
-	// Top shelf close affordance
-	closeBtnRect := geometry.NewRect(tabStartX+(tabBarWidth-32)/2, b.Min.Y+12, 32, 22)
-	if closeBtnRect.Contains(pos) {
-		v.SetState(window.StateFan)
-		return true
-	}
-
-	// Top shelf status affordance
-	statusBtnRect := geometry.NewRect(tabStartX+8, b.Min.Y+12, 24, 22)
-	if statusEnabled && statusBtnRect.Contains(pos) {
-		v.ToggleStatus()
-		return true
+	// Top shelf close and status affordances
+	if statusEnabled {
+		statusBtnRect := geometry.NewRect(tabStartX+6, b.Min.Y+12, tabBarWidth-44, 22)
+		if statusBtnRect.Contains(pos) {
+			v.ToggleStatus()
+			return true
+		}
+		closeBtnRect := geometry.NewRect(tabStartX+tabBarWidth-34, b.Min.Y+12, 28, 22)
+		if closeBtnRect.Contains(pos) {
+			v.SetState(window.StateFan)
+			return true
+		}
+	} else {
+		closeBtnRect := geometry.NewRect(tabStartX+(tabBarWidth-36)/2, b.Min.Y+12, 36, 22)
+		if closeBtnRect.Contains(pos) {
+			v.SetState(window.StateFan)
+			return true
+		}
 	}
 
 	settingsTabRect := geometry.NewRect(tabStartX+2, b.Min.Y+h-48, tabBarWidth-14, 34)
@@ -2580,7 +2707,7 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		return true
 	}
 
-	tabMinY := b.Min.Y + float32(40)
+	tabMinY := b.Min.Y + float32(44)
 	tabMaxY := b.Min.Y + h - float32(56)
 	tabStartY := tabMinY - scrollY
 	tabHeight := float32(64)

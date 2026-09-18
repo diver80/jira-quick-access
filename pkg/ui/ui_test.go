@@ -863,8 +863,8 @@ func TestAppViewClickAndHoverDetails(t *testing.T) {
 	view.SetBounds(geometry.NewRect(0, 0, 120, 500))
 	view.Draw(ctx, canvas)
 
-	// Click instance header in Fan state (y=15) to cycle instances
-	view.handleClick(geometry.Pt(50, 15))
+	// Click instance header in Fan state (y=48, below status tab) to cycle instances
+	view.handleClick(geometry.Pt(50, 48))
 	view.mu.Lock()
 	activeInst := view.activeInstIdx
 	view.mu.Unlock()
@@ -872,8 +872,8 @@ func TestAppViewClickAndHoverDetails(t *testing.T) {
 		t.Errorf("expected activeInstIdx to cycle to 1, got %d", activeInst)
 	}
 
-	// Click tab in Fan state (y=80) to expand
-	view.handleClick(geometry.Pt(50, 80))
+	// Click tab in Fan state (y=110) to expand
+	view.handleClick(geometry.Pt(50, 110))
 	if view.state != window.StateExpanded {
 		t.Errorf("expected clicking tab in Fan to expand to StateExpanded, got %v", view.state)
 	}
@@ -1356,9 +1356,9 @@ func TestHoverExpandedTab(t *testing.T) {
 	v.SetBounds(geometry.NewRect(0, 0, 780, 580))
 
 	// In StateExpanded with DockSideRight (default), tabs are on the right side:
-	// tabBarWidth = 110, tabStartX = 780 - 110 = 670, tabStartY = 20, tabHeight = 64
-	// Point at x=700, y=40 is inside the first tab.
-	v.handleHover(geometry.Pt(700, 40))
+	// tabBarWidth = 110, tabStartX = 780 - 110 = 670, tabStartY = 44, tabHeight = 64
+	// Point at x=700, y=60 is inside the first tab.
+	v.handleHover(geometry.Pt(700, 60))
 
 	v.mu.Lock()
 	hovIdx := v.hoveredTabIdx
