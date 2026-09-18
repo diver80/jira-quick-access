@@ -1275,12 +1275,14 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	canvas.DrawRoundRect(dockShelfRect, widget.RGBA8(20, 28, 44, 175), 12)
 	canvas.StrokeRoundRect(dockShelfRect, widget.RGBA8(255, 255, 255, 80), 12, 1.5)
 
-	// Top subtle drag bar on the dock shelf
-	shelfDragRect := geometry.NewRect(tabStartX+(tabBarWidth-32)/2, b.Min.Y+12, 28, 3)
-	canvas.DrawRoundRect(shelfDragRect, widget.RGBA8(255, 255, 255, 90), 1.5)
+	// Top native close button on the dock shelf (100% fail-safe outside WebKit)
+	closeBtnRect := geometry.NewRect(tabStartX+(tabBarWidth-32)/2, b.Min.Y+12, 32, 22)
+	canvas.DrawRoundRect(closeBtnRect, widget.RGBA8(28, 38, 58, 240), 6)
+	canvas.StrokeRoundRect(closeBtnRect, widget.RGBA8(255, 255, 255, 140), 6, 1.0)
+	canvas.DrawText("✕", closeBtnRect, 10, widget.RGBA8(255, 255, 255, 240), true, widget.TextAlignCenter)
 
 	// Draw side tabs inside the dock shelf with strict bounds clipping
-	tabMinY := b.Min.Y + float32(20)
+	tabMinY := b.Min.Y + float32(40)
 	tabMaxY := b.Min.Y + h - float32(56)
 	tabStartY := tabMinY - s.scrollY
 	tabHeight := float32(64)
@@ -1910,7 +1912,7 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 			newHoverSet = true
 		} else {
 			filtered := v.getFilteredIssues()
-			tabMinY := b.Min.Y + float32(20)
+			tabMinY := b.Min.Y + float32(40)
 			tabMaxY := b.Min.Y + h - float32(56)
 			tabStartY := tabMinY - scrollY
 			tabHeight := float32(64)
@@ -2082,9 +2084,10 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		cardStartX = b.Min.X + tabBarWidth + 8
 	}
 
-	// Top shelf drag affordance
-	if pos.Y <= b.Min.Y+18 && pos.X >= tabStartX && pos.X <= tabStartX+tabBarWidth {
-		v.StartDrag()
+	// Top shelf close affordance
+	closeBtnRect := geometry.NewRect(tabStartX+(tabBarWidth-32)/2, b.Min.Y+12, 32, 22)
+	if closeBtnRect.Contains(pos) {
+		v.SetState(window.StateFan)
 		return true
 	}
 
@@ -2094,7 +2097,7 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		return true
 	}
 
-	tabMinY := b.Min.Y + float32(20)
+	tabMinY := b.Min.Y + float32(40)
 	tabMaxY := b.Min.Y + h - float32(56)
 	tabStartY := tabMinY - scrollY
 	tabHeight := float32(64)

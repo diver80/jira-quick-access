@@ -219,3 +219,14 @@ func TestManagerSetToolTip(t *testing.T) {
 		t.Errorf("expected package-level SetToolTip to update manager, got %q", mgr.tooltip)
 	}
 }
+
+func TestCollapseCallbackInvoked(t *testing.T) {
+	invoked := false
+	RegisterCollapseHandler(func() {
+		invoked = true
+	})
+	goCollapseCallback()
+	if !invoked {
+		t.Fatalf("expected collapseCallback to be invoked")
+	}
+}

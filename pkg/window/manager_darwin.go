@@ -464,20 +464,32 @@ static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
                     [g_ticketWebView.layer setBorderWidth:1.5];
                     [g_ticketWebView.layer setBorderColor:[[NSColor colorWithCalibratedWhite:1.0 alpha:0.40] CGColor]];
                     [g_ticketWebView.layer setBackgroundColor:[[NSColor colorWithCalibratedRed:0.07 green:0.09 blue:0.15 alpha:0.98] CGColor]];
+                    [g_ticketWebView.layer setZPosition:0.0];
                     [contentView addSubview:g_ticketWebView];
 
-                    // Floating sleek Close button (✕)
-                    g_closeButton = [[NSButton alloc] initWithFrame:NSMakeRect(closeX, (CGFloat)(h - 44), 28, 28)];
-                    [g_closeButton setTitle:@"✕"];
-                    [g_closeButton setBezelStyle:NSBezelStyleCircular];
+                    // Floating sleek high-contrast Close button (✕)
+                    g_closeButton = [[NSButton alloc] initWithFrame:NSMakeRect(closeX, (CGFloat)(h - 44), 32, 32)];
+                    [g_closeButton setBezelStyle:NSBezelStyleRegularSquare];
                     [g_closeButton setButtonType:NSButtonTypeMomentaryPushIn];
+                    [g_closeButton setBordered:NO];
                     [g_closeButton setTarget:g_appWindow];
                     [g_closeButton setAction:@selector(onCloseHUDClicked:)];
                     [g_closeButton setWantsLayer:YES];
-                    [g_closeButton.layer setCornerRadius:14.0];
-                    [g_closeButton.layer setBorderWidth:1.0];
-                    [g_closeButton.layer setBorderColor:[[NSColor colorWithCalibratedWhite:1.0 alpha:0.35] CGColor]];
-                    [contentView addSubview:g_closeButton positioned:NSWindowAbove relativeTo:g_ticketWebView];
+                    [g_closeButton.layer setCornerRadius:16.0];
+                    [g_closeButton.layer setMasksToBounds:YES];
+                    [g_closeButton.layer setBorderWidth:1.5];
+                    [g_closeButton.layer setBorderColor:[[NSColor colorWithCalibratedWhite:1.0 alpha:0.65] CGColor]];
+                    [g_closeButton.layer setBackgroundColor:[[NSColor colorWithCalibratedRed:0.08 green:0.11 blue:0.18 alpha:0.96] CGColor]];
+                    [g_closeButton.layer setZPosition:9999.0];
+
+                    NSDictionary *attrs = @{
+                        NSForegroundColorAttributeName: [NSColor whiteColor],
+                        NSFontAttributeName: [NSFont boldSystemFontOfSize:14.0]
+                    };
+                    NSAttributedString *attrTitle = [[NSAttributedString alloc] initWithString:@"✕" attributes:attrs];
+                    [g_closeButton setAttributedTitle:attrTitle];
+
+                    [contentView addSubview:g_closeButton positioned:NSWindowAbove relativeTo:nil];
                 }
             }
             if (g_ticketWebView) {
@@ -486,11 +498,17 @@ static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
                 [g_ticketWebView.layer setMasksToBounds:YES];
                 [g_ticketWebView.layer setBorderWidth:1.5];
                 [g_ticketWebView.layer setBorderColor:[[NSColor colorWithCalibratedWhite:1.0 alpha:0.40] CGColor]];
+                [g_ticketWebView.layer setZPosition:0.0];
                 [g_ticketWebView setHidden:NO];
                 [g_ticketWebView evaluateJavaScript:kHideJiraHeaderScript completionHandler:nil];
             }
             if (g_closeButton) {
-                [g_closeButton setFrame:NSMakeRect(closeX, (CGFloat)(h - 44), 28, 28)];
+                [g_closeButton setFrame:NSMakeRect(closeX, (CGFloat)(h - 44), 32, 32)];
+                [g_closeButton.layer setZPosition:9999.0];
+                NSView *cv = [g_appWindow contentView];
+                if (cv) {
+                    [cv addSubview:g_closeButton positioned:NSWindowAbove relativeTo:nil];
+                }
                 [g_closeButton setHidden:NO];
             }
             if (g_appWindow) {
