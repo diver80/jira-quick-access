@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"jira-quick-access/pkg/jira"
@@ -75,6 +76,14 @@ func main() {
 	rootView.RefreshIssues()
 	if cfg.StatusCheckEnabled {
 		rootView.RefreshStatus()
+	}
+
+	if os.Getenv("JIRA_OPEN_STATUS") == "1" {
+		go func() {
+			time.Sleep(1500 * time.Millisecond)
+			rootView.OpenStatus()
+			gogpuApp.RequestRedraw()
+		}()
 	}
 
 	uiApp.SetRoot(rootView)

@@ -42,6 +42,14 @@ You can also drop a `.env` file (see `.env.example`) directly in the app's worki
 
 ---
 
+## 🌐 Atlassian Cloud Live-Status
+
+![Atlassian Cloud Status Panel](docs/screenshots/status.png)
+
+Global real-time incident telemetry and service health monitoring across 8 core Atlassian products (**Jira Software**, **Jira Service Management**, **Confluence**, **Bitbucket**, **Atlassian Migrations**, **Atlassian Analytics**, **Rovo**, **Rovo Dev**) with direct links to component statuspages.
+
+---
+
 ## ✨ Features & Polish
 
 ### 🏝️ 3-State Edge Rail Architecture
