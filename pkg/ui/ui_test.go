@@ -1744,7 +1744,23 @@ func TestStatusPanelEightProducts(t *testing.T) {
 	}
 }
 
+func TestAppViewSetVersionAndSettingsBadge(t *testing.T) {
+	cfg := jira.Config{
+		Instances: []jira.InstanceConfig{
+			{Name: "TestInst", BaseURL: "https://test.atlassian.net"},
+		},
+	}
+	client := jira.NewClient(cfg)
+	view := NewAppView(cfg, client, func() {})
+	defer view.Close()
 
+	if view.snapshot().version != "" {
+		t.Errorf("expected empty version initially, got %q", view.snapshot().version)
+	}
 
-
-
+	view.SetVersion("1.0.5")
+	snap := view.snapshot()
+	if snap.version != "1.0.5" {
+		t.Errorf("expected version 1.0.5 in snapshot, got %q", snap.version)
+	}
+}

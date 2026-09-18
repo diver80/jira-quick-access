@@ -139,21 +139,27 @@ EOF
         rm -rf "${DMG_STAGING}"
     fi
 
-    tar -czf "${DIST_DIR}/osx/JiraQuickAccess-macOS-Universal.tar.gz" -C "${STAGING_DIR}" "${APP_DISPLAY_NAME}.app"
+    tar -czf "${DIST_DIR}/osx/JiraQuickAccess-v${VERSION}-macOS-Universal.tar.gz" -C "${STAGING_DIR}" "${APP_DISPLAY_NAME}.app"
+    cp "${DIST_DIR}/osx/JiraQuickAccess-v${VERSION}-macOS-Universal.tar.gz" "${DIST_DIR}/osx/JiraQuickAccess-macOS-Universal.tar.gz"
 
     echo -e "${GREEN}✓ macOS build & DMG completed!${NC}"
 }
 
 build_win() {
-    echo -e "${BLUE}🪟 Building for Windows...${NC}"
+    echo -e "${BLUE}🪟 Building for Windows (v${VERSION})...${NC}"
     
     mkdir -p "${DIST_DIR}/win"
-    CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o "${DIST_DIR}/win/${APP_NAME}-windows-amd64.exe" .
-    CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o "${DIST_DIR}/win/${APP_NAME}-windows-arm64.exe" .
+    CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o "${DIST_DIR}/win/${APP_NAME}-v${VERSION}-windows-amd64.exe" .
+    CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o "${DIST_DIR}/win/${APP_NAME}-v${VERSION}-windows-arm64.exe" .
     
+    cp "${DIST_DIR}/win/${APP_NAME}-v${VERSION}-windows-amd64.exe" "${DIST_DIR}/win/${APP_NAME}-windows-amd64.exe"
+    cp "${DIST_DIR}/win/${APP_NAME}-v${VERSION}-windows-arm64.exe" "${DIST_DIR}/win/${APP_NAME}-windows-arm64.exe"
+
     if command -v zip >/dev/null 2>&1; then
         cd "${DIST_DIR}/win"
-        zip -q "${APP_NAME}-windows-amd64.zip" "${APP_NAME}-windows-amd64.exe"
+        zip -q "${APP_NAME}-v${VERSION}-windows-amd64.zip" "${APP_NAME}-v${VERSION}-windows-amd64.exe"
+        cp "${APP_NAME}-v${VERSION}-windows-amd64.zip" "${APP_NAME}-windows-amd64.zip"
+        zip -q "${APP_NAME}-v${VERSION}-windows-arm64.zip" "${APP_NAME}-v${VERSION}-windows-arm64.exe"
         cd - > /dev/null
     fi
 
@@ -161,18 +167,23 @@ build_win() {
 }
 
 build_lin() {
-    echo -e "${BLUE}🐧 Building for Linux...${NC}"
+    echo -e "${BLUE}🐧 Building for Linux (v${VERSION})...${NC}"
     
     mkdir -p "${DIST_DIR}/lin"
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o "${DIST_DIR}/lin/${APP_NAME}-linux-amd64" .
-    chmod +x "${DIST_DIR}/lin/${APP_NAME}-linux-amd64"
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o "${DIST_DIR}/lin/${APP_NAME}-v${VERSION}-linux-amd64" .
+    chmod +x "${DIST_DIR}/lin/${APP_NAME}-v${VERSION}-linux-amd64"
     
-    CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o "${DIST_DIR}/lin/${APP_NAME}-linux-arm64" .
-    chmod +x "${DIST_DIR}/lin/${APP_NAME}-linux-arm64"
+    CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o "${DIST_DIR}/lin/${APP_NAME}-v${VERSION}-linux-arm64" .
+    chmod +x "${DIST_DIR}/lin/${APP_NAME}-v${VERSION}-linux-arm64"
+
+    cp "${DIST_DIR}/lin/${APP_NAME}-v${VERSION}-linux-amd64" "${DIST_DIR}/lin/${APP_NAME}-linux-amd64"
+    cp "${DIST_DIR}/lin/${APP_NAME}-v${VERSION}-linux-arm64" "${DIST_DIR}/lin/${APP_NAME}-linux-arm64"
 
     cd "${DIST_DIR}/lin"
-    tar -czf "${APP_NAME}-linux-amd64.tar.gz" "${APP_NAME}-linux-amd64"
-    tar -czf "${APP_NAME}-linux-arm64.tar.gz" "${APP_NAME}-linux-arm64"
+    tar -czf "${APP_NAME}-v${VERSION}-linux-amd64.tar.gz" "${APP_NAME}-v${VERSION}-linux-amd64"
+    cp "${APP_NAME}-v${VERSION}-linux-amd64.tar.gz" "${APP_NAME}-linux-amd64.tar.gz"
+    tar -czf "${APP_NAME}-v${VERSION}-linux-arm64.tar.gz" "${APP_NAME}-v${VERSION}-linux-arm64"
+    cp "${APP_NAME}-v${VERSION}-linux-arm64.tar.gz" "${APP_NAME}-linux-arm64.tar.gz"
     cd - > /dev/null
 
     echo -e "${GREEN}✓ Linux build completed!${NC}"

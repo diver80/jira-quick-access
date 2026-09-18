@@ -23,6 +23,21 @@ var (
 )
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "-v", "--version", "version":
+			fmt.Printf("Jira Quick Access v%s (built %s)\n", version, buildTime)
+			return
+		case "-h", "--help", "help":
+			fmt.Printf("Jira Quick Access v%s\n", version)
+			fmt.Println("Usage: jira-quick-access [flags]")
+			fmt.Println("Flags:")
+			fmt.Println("  -v, --version    Print version information and exit")
+			fmt.Println("  -h, --help       Print this help message and exit")
+			return
+		}
+	}
+
 	// 1. Load multi-tenant configuration (or default fallback with .env)
 	cfg := jira.LoadConfig()
 
@@ -62,6 +77,7 @@ func main() {
 		uiApp.Window().HandleResize(w, h)
 		gogpuApp.RequestRedraw()
 	})
+	rootView.SetVersion(version)
 	defer rootView.Close()
 
 	reloadCh := make(chan struct{}, 1)

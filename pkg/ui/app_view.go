@@ -90,6 +90,7 @@ type AppView struct {
 	statusIntervalVal string
 	statusOpenedFrom   window.WindowState
 	settingsOpenedFrom window.WindowState
+	version            string
 
 	// Callbacks
 	onRedraw       func()
@@ -137,6 +138,7 @@ type appViewStateSnapshot struct {
 	cursorPos         int
 	selectAll         bool
 	statusMsg         string
+	version           string
 	config            jira.Config
 }
 
@@ -346,6 +348,13 @@ func (v *AppView) SetOnResize(fn func(w, h int)) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.onResize = fn
+}
+
+// SetVersion sets the application version string displayed in UI overlays.
+func (v *AppView) SetVersion(ver string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.version = ver
 }
 
 // SetBounds overrides widget.WidgetBase.SetBounds to enforce that bounds always match
@@ -636,6 +645,7 @@ func (v *AppView) snapshot() appViewStateSnapshot {
 		cursorPos:         v.cursorPos,
 		selectAll:         v.selectAll,
 		statusMsg:         v.statusMsg,
+		version:           v.version,
 		config:            v.config,
 	}
 }
@@ -1949,6 +1959,13 @@ func (v *AppView) drawSettingsOverlay(ctx widget.Context, canvas widget.Canvas, 
 	// 1. Header Title & Top Controls
 	hdrRect := geometry.NewRect(r.Min.X+20, r.Min.Y+14, 250, 22)
 	canvas.DrawText("Jira Instances & Credentials", hdrRect, 14, widget.RGBA8(245, 250, 255, 255), true, widget.TextAlignLeft)
+
+	if s.version != "" {
+		vRect := geometry.NewRect(r.Min.X+236, r.Min.Y+15, 52, 19)
+		canvas.DrawRoundRect(vRect, widget.RGBA8(40, 52, 75, 220), 4)
+		canvas.StrokeRoundRect(vRect, widget.RGBA8(255, 255, 255, 40), 4, 1.0)
+		canvas.DrawText("v"+s.version, vRect, 10, widget.RGBA8(160, 195, 240, 255), true, widget.TextAlignCenter)
+	}
 
 	// Load .env button
 	envRect := geometry.NewRect(r.Min.X+r.Width()-155, r.Min.Y+12, 75, 24)
