@@ -863,8 +863,8 @@ func TestAppViewClickAndHoverDetails(t *testing.T) {
 	view.SetBounds(geometry.NewRect(0, 0, 120, 500))
 	view.Draw(ctx, canvas)
 
-	// Click instance header in Fan state (y=48, below status tab) to cycle instances
-	view.handleClick(geometry.Pt(50, 48))
+	// Click instance header in Fan state (y=18) to cycle instances
+	view.handleClick(geometry.Pt(50, 18))
 	view.mu.Lock()
 	activeInst := view.activeInstIdx
 	view.mu.Unlock()
@@ -872,8 +872,8 @@ func TestAppViewClickAndHoverDetails(t *testing.T) {
 		t.Errorf("expected activeInstIdx to cycle to 1, got %d", activeInst)
 	}
 
-	// Click tab in Fan state (y=110) to expand
-	view.handleClick(geometry.Pt(50, 110))
+	// Click tab in Fan state (y=80) to expand
+	view.handleClick(geometry.Pt(50, 80))
 	if view.state != window.StateExpanded {
 		t.Errorf("expected clicking tab in Fan to expand to StateExpanded, got %v", view.state)
 	}
@@ -1532,16 +1532,13 @@ func TestStatusIndicatorClicks(t *testing.T) {
 		t.Errorf("expected status panel to be closed")
 	}
 
-	// 2. In Fan state, clicking top right status dot opens status panel
+	// 2. In Fan state, status indicator is intentionally not present to prioritize instance work items
 	view.SetState(window.StateFan)
 	w := float32(200)
 	view.handleClick(geometry.Pt(w-18, 19))
-	if !view.IsStatusOpen() {
-		t.Errorf("expected status panel to open after clicking top right dot in StateFan")
+	if view.IsStatusOpen() {
+		t.Errorf("expected status panel NOT to open in StateFan because status is omitted from work items")
 	}
-
-	// Close status panel
-	view.CloseStatus()
 
 	// 3. In Expanded state, clicking top shelf status button opens status panel
 	view.SetState(window.StateExpanded)
@@ -1762,5 +1759,65 @@ func TestAppViewSetVersionAndSettingsBadge(t *testing.T) {
 	snap := view.snapshot()
 	if snap.version != "1.0.5" {
 		t.Errorf("expected version 1.0.5 in snapshot, got %q", snap.version)
+	}
+}
+
+func TestFanStateFourWorkItemsClickable(t *testing.T) {
+	cfg := jira.Config{
+		StatusCheckEnabled: true,
+		Instances: []jira.InstanceConfig{
+			{Name: "TestInst", BaseURL: "https://test.atlassian.net"},
+		},
+	}
+	client := jira.NewClient(cfg)
+	view := NewAppView(cfg, client, func() {})
+	defer view.Close()
+
+	// 4 test issues
+	issues := []jira.Issue{
+		{Key: "PROJ-1", Summary: "Issue 1", Status: jira.Status{Name: "To Do"}},
+		{Key: "PROJ-2", Summary: "Issue 2", Status: jira.Status{Name: "In Progress"}},
+		{Key: "PROJ-3", Summary: "Issue 3", Status: jira.Status{Name: "In Review"}},
+		{Key: "PROJ-4", Summary: "Issue 4", Status: jira.Status{Name: "Done"}},
+	}
+	view.mu.Lock()
+	view.issues = issues
+	view.invalidateFilterCacheLocked()
+	view.mu.Unlock()
+
+	view.SetState(window.StateFan)
+	w, h := view.computeSize(window.StateFan)
+	view.SetBounds(geometry.NewRect(0, 0, float32(w), float32(h)))
+
+	// 4th issue is at index 3:
+	// tabStartY = 60
+	// tab 0: 60..122
+	// tab 1: 128..190
+	// tab 2: 196..258
+	// tab 3: 264..326
+	hovered := view.handleHover(geometry.Pt(50, 295))
+	if !hovered {
+		t.Errorf("expected handleHover to return true for 4th issue tab")
+	}
+	view.mu.Lock()
+	hovIdx := view.hoveredTabIdx
+	view.mu.Unlock()
+	if hovIdx != 3 {
+		t.Errorf("expected hoveredTabIdx to be 3 (the 4th issue), got %d", hovIdx)
+	}
+
+	clicked := view.handleClick(geometry.Pt(50, 295))
+	if !clicked {
+		t.Errorf("expected clicking on 4th issue tab to be handled")
+	}
+	view.mu.Lock()
+	st := view.state
+	active := view.activeIdx
+	view.mu.Unlock()
+	if st != window.StateExpanded {
+		t.Errorf("expected state to expand to StateExpanded, got %v", st)
+	}
+	if active != 3 {
+		t.Errorf("expected activeIdx to be 3 (PROJ-4), got %d", active)
 	}
 }

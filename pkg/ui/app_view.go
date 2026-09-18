@@ -1319,37 +1319,11 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		dragBarRect := geometry.NewRect(b.Min.X+w/2-14, b.Min.Y+3, 28, 3)
 		canvas.DrawRoundRect(dragBarRect, widget.RGBA8(255, 255, 255, 90), 1.5)
 
-		// 2. Global Status Tab (when enabled)
+		// 2. Top Instance Header Pill
 		instHeaderY := b.Min.Y + 8
 		searchY := b.Min.Y + 34
 		tabMinY := b.Min.Y + float32(60)
 
-		if s.config.StatusCheckEnabled {
-			icon, text, fg, bg, border := getStatusBadgeInfo(s.statusReport.OverallIndicator)
-			statusTabRect := geometry.NewRect(b.Min.X+7, b.Min.Y+8, w-14, 24)
-			stBg := bg
-			stBorder := border
-			if s.showStatus {
-				stBg = widget.RGBA8(46, 62, 92, 255)
-				stBorder = widget.RGBA8(255, 255, 255, 120)
-			} else if s.hoveredStatus {
-				stBg = widget.RGBA8(52, 68, 96, 245)
-				stBorder = widget.RGBA8(255, 255, 255, 120)
-			}
-			canvas.DrawRoundRect(statusTabRect, stBg, 6)
-			canvas.StrokeRoundRect(statusTabRect, stBorder, 6, 1.0)
-			canvas.DrawText(icon+" "+text, statusTabRect, 9, fg, true, widget.TextAlignCenter)
-
-			// Divider line below status
-			topDividerY := b.Min.Y + 36
-			canvas.DrawLine(geometry.Pt(b.Min.X+10, topDividerY), geometry.Pt(b.Min.X+w-10, topDividerY), widget.RGBA8(255, 255, 255, 45), 1.0)
-
-			instHeaderY = b.Min.Y + 40
-			searchY = b.Min.Y + 66
-			tabMinY = b.Min.Y + float32(92)
-		}
-
-		// 3. Top Instance Header Pill
 		instName := "All Instances"
 		instBeaconColor := widget.RGBA8(56, 189, 248, 240)
 		if s.activeInstIdx >= 0 && s.activeInstIdx < len(s.instances) {
@@ -2487,28 +2461,21 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 		newHoverSet := false
 		newHoverStat := false
 
-		if statusEnabled && pos.Y >= b.Min.Y+8 && pos.Y <= b.Min.Y+32 {
-			newHoverStat = true
-		} else if pos.Y >= b.Min.Y+h-44 {
+		if pos.Y >= b.Min.Y+h-44 {
 			newHoverSet = true
 		} else {
 			tabMinY := b.Min.Y + float32(60)
-			if statusEnabled {
-				tabMinY = b.Min.Y + float32(92)
-			}
 			tabMaxY := b.Min.Y + h - float32(50)
 			tabStartY := tabMinY - scrollY
 			tabHeight := float32(62)
 			tabGap := float32(6)
 
+			tabVisibleRect := geometry.NewRect(b.Min.X+2, tabMinY, w-4, tabMaxY-tabMinY)
 			filtered := v.getFilteredIssues()
 			for i := range filtered {
 				tabY := tabStartY + float32(i)*(tabHeight+tabGap)
-				if tabY < tabMinY-2 || tabY+tabHeight > tabMaxY+2 {
-					continue
-				}
 				tabRect := geometry.NewRect(b.Min.X+2, tabY, w-4, tabHeight)
-				if tabRect.Contains(pos) {
+				if tabRect.Contains(pos) && tabVisibleRect.Contains(pos) {
 					newHoverTab = i
 					break
 				}
@@ -2567,13 +2534,11 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 			tabHeight := float32(64)
 			tabGap := float32(7)
 
+			tabVisibleRect := geometry.NewRect(tabStartX, tabMinY, tabBarWidth-4, tabMaxY-tabMinY)
 			for i := range filtered {
 				tabY := tabStartY + float32(i)*(tabHeight+tabGap)
-				if tabY < tabMinY-2 || tabY+tabHeight > tabMaxY+2 {
-					continue
-				}
 				tabRect := geometry.NewRect(tabStartX, tabY, tabBarWidth-4, tabHeight)
-				if tabRect.Contains(pos) {
+				if tabRect.Contains(pos) && tabVisibleRect.Contains(pos) {
 					newHoverTab = i
 					break
 				}
@@ -2656,12 +2621,6 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 
 	// 1. Fan State Clicks
 	if st == window.StateFan {
-		// Top global status tab click in Fan
-		if statusEnabled && pos.Y >= b.Min.Y+8 && pos.Y <= b.Min.Y+32 {
-			v.ToggleStatus()
-			return true
-		}
-
 		if pos.Y <= b.Min.Y+6 {
 			v.StartDrag()
 			return true
@@ -2670,11 +2629,6 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		instHeaderY := b.Min.Y + 8
 		searchY := b.Min.Y + 34
 		tabMinY := b.Min.Y + float32(60)
-		if statusEnabled {
-			instHeaderY = b.Min.Y + 40
-			searchY = b.Min.Y + 66
-			tabMinY = b.Min.Y + float32(92)
-		}
 
 		// Clear search "✕" button
 		v.mu.Lock()
@@ -2726,13 +2680,11 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		tabHeight := float32(62)
 		tabGap := float32(6)
 
+		tabVisibleRect := geometry.NewRect(b.Min.X+7, tabMinY, w-14, tabMaxY-tabMinY)
 		for i, fIss := range filteredIssues {
 			tabY := tabStartY + float32(i)*(tabHeight+tabGap)
-			if tabY < tabMinY-2 || tabY+tabHeight > tabMaxY+2 {
-				continue
-			}
 			tabRect := geometry.NewRect(b.Min.X+7, tabY, w-14, tabHeight)
-			if tabRect.Contains(pos) {
+			if tabRect.Contains(pos) && tabVisibleRect.Contains(pos) {
 				for origIdx, oIss := range allIssues {
 					if oIss.Key == fIss.Key {
 						v.Expand(origIdx)
@@ -2807,13 +2759,11 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		tabHeight := float32(64)
 		tabGap := float32(7)
 
+		tabVisibleRect := geometry.NewRect(tabStartX, tabMinY, tabBarWidth-4, tabMaxY-tabMinY)
 		for i, iss := range filteredIssues {
 			tabY := tabStartY + float32(i)*(tabHeight+tabGap)
-			if tabY < tabMinY-2 || tabY+tabHeight > tabMaxY+2 {
-				continue
-			}
 			tabRect := geometry.NewRect(tabStartX, tabY, tabBarWidth-4, tabHeight)
-			if tabRect.Contains(pos) {
+			if tabRect.Contains(pos) && tabVisibleRect.Contains(pos) {
 				for origIdx, oIss := range allIssues {
 					if oIss.Key == iss.Key {
 						if activeIdx == origIdx && !showSettings && !showStatus {
