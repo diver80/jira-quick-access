@@ -660,6 +660,18 @@ func (m *DarwinManager) InitEdgeRail(width, height int) error {
 func (m *DarwinManager) SetState(state WindowState, width, height int) {
 	m.mu.Lock()
 	m.state = state
+	if state == StateRest {
+		if width > 45 {
+			width = 36
+		}
+		if height > 300 {
+			height = 224
+		}
+	} else if state == StateFan {
+		if width > 150 {
+			width = 120
+		}
+	}
 	m.currentWidth = width
 	m.currentHeight = height
 	st := m.state
@@ -669,6 +681,18 @@ func (m *DarwinManager) SetState(state WindowState, width, height int) {
 
 func (m *DarwinManager) Dock(width, height int) {
 	m.mu.Lock()
+	if m.state == StateRest {
+		if width > 45 {
+			width = 36
+		}
+		if height > 300 {
+			height = 224
+		}
+	} else if m.state == StateFan {
+		if width > 150 {
+			width = 120
+		}
+	}
 	m.currentWidth = width
 	m.currentHeight = height
 	st := m.state

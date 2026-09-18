@@ -636,15 +636,6 @@ func (v *AppView) snapshot() appViewStateSnapshot {
 }
 
 func (v *AppView) computeSize(st window.WindowState) (int, int) {
-	v.mu.Lock()
-	showSet := v.showSettings
-	showStat := v.showStatus
-	v.mu.Unlock()
-
-	if showSet || showStat {
-		return 780, 580
-	}
-
 	switch st {
 	case window.StateRest:
 		return 36, 224
@@ -681,6 +672,10 @@ func (v *AppView) SetState(newState window.WindowState) {
 	} else {
 		v.lastHover = time.Time{}
 		v.searchActive = false
+	}
+	if newState == window.StateRest || newState == window.StateFan {
+		v.showSettings = false
+		v.showStatus = false
 	}
 	showSettings := v.showSettings
 	showStatus := v.showStatus
@@ -849,6 +844,13 @@ func (v *AppView) ToggleSettings() {
 	} else {
 		v.SetState(window.StateFan)
 	}
+}
+
+func (v *AppView) CloseSettings() {
+	v.mu.Lock()
+	v.showSettings = false
+	v.mu.Unlock()
+	v.SetState(window.StateFan)
 }
 
 func (v *AppView) IsStatusOpen() bool {
@@ -1086,6 +1088,10 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	// 1. STATE REST: macOS Dock Glass Capsule with Complete Crisp White Border
 	// =========================================================================
 	if s.state == window.StateRest {
+		w = 36
+		h = 224
+		b = geometry.NewRect(s.bounds.Min.X, s.bounds.Min.Y, w, h)
+
 		// Inset pill by 1.5px on all sides so the stroke is 100% visible, fully rounded and unclipped
 		pillRect := geometry.NewRect(b.Min.X+1.5, b.Min.Y+1.5, w-3.0, h-3.0)
 		pillRadius := float32((w - 3.0) / 2.0)
@@ -1260,6 +1266,8 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	// 2. STATE FAN: Vertical Dock Tabs with Instance Header & Search (120xH)
 	// =========================================================================
 	if s.state == window.StateFan {
+		w = 120
+		b = geometry.NewRect(s.bounds.Min.X, s.bounds.Min.Y, w, h)
 		railBackdrop := geometry.NewRect(b.Min.X+1.0, b.Min.Y+1.0, w-2.0, h-2.0)
 		canvas.DrawRoundRect(railBackdrop, widget.RGBA8(20, 28, 44, 200), 14)
 		canvas.StrokeRoundRect(railBackdrop, widget.RGBA8(255, 255, 255, 100), 14, 1.5)
@@ -1480,6 +1488,9 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	// =========================================================================
 	// 3. STATE EXPANDED: Side Dock Column + Multi-Instance Settings Overlay (780x580)
 	// =========================================================================
+	w = 780
+	h = 580
+	b = geometry.NewRect(s.bounds.Min.X, s.bounds.Min.Y, w, h)
 	tabBarWidth := float32(110)
 	cardAreaWidth := w - tabBarWidth - 14
 
@@ -2695,12 +2706,16 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		}
 		closeBtnRect := geometry.NewRect(tabStartX+tabBarWidth-34, b.Min.Y+12, 28, 22)
 		if closeBtnRect.Contains(pos) {
+			v.CloseStatus()
+			v.CloseSettings()
 			v.SetState(window.StateFan)
 			return true
 		}
 	} else {
 		closeBtnRect := geometry.NewRect(tabStartX+(tabBarWidth-36)/2, b.Min.Y+12, 36, 22)
 		if closeBtnRect.Contains(pos) {
+			v.CloseStatus()
+			v.CloseSettings()
 			v.SetState(window.StateFan)
 			return true
 		}

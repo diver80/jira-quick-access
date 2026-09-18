@@ -1597,4 +1597,53 @@ func TestSettingsSyncAndStatusConfiguration(t *testing.T) {
 	}
 }
 
+func TestNoZoomBugOnStateTransitions(t *testing.T) {
+	view, _ := createTestAppView()
+	defer view.Close()
+
+	// 1. Open Status overlay (780x580)
+	view.OpenStatus()
+	if !view.IsStatusOpen() || view.state != window.StateExpanded {
+		t.Fatalf("expected Status to be open in StateExpanded")
+	}
+
+	// 2. Transition directly to StateRest (e.g. from click away, escape, or timer)
+	view.SetState(window.StateRest)
+	if view.state != window.StateRest {
+		t.Errorf("expected state to be StateRest, got %v", view.state)
+	}
+	if view.IsStatusOpen() {
+		t.Errorf("expected Status overlay to be closed in StateRest")
+	}
+	w, h := view.computeSize(view.state)
+	if w != 36 || h != 224 {
+		t.Errorf("expected StateRest size (36, 224), got (%d, %d)", w, h)
+	}
+	b := view.Bounds()
+	if b.Width() != 36 || b.Height() != 224 {
+		t.Errorf("expected bounds in StateRest to be 36x224, got %fx%f", b.Width(), b.Height())
+	}
+
+	// 3. Open Settings overlay (780x580)
+	view.OpenSettings()
+	if !view.showSettings || view.state != window.StateExpanded {
+		t.Fatalf("expected Settings to be open in StateExpanded")
+	}
+
+	// 4. Transition directly to StateRest
+	view.SetState(window.StateRest)
+	if view.showSettings {
+		t.Errorf("expected Settings overlay to be closed in StateRest")
+	}
+	w, h = view.computeSize(view.state)
+	if w != 36 || h != 224 {
+		t.Errorf("expected StateRest size (36, 224), got (%d, %d)", w, h)
+	}
+	b = view.Bounds()
+	if b.Width() != 36 || b.Height() != 224 {
+		t.Errorf("expected bounds in StateRest to be 36x224, got %fx%f", b.Width(), b.Height())
+	}
+}
+
+
 
