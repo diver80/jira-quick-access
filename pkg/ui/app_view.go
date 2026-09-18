@@ -1719,6 +1719,23 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	}
 }
 
+type statusAppInfo struct {
+	Name string
+	Key  string
+	URL  string
+}
+
+var atlassianCoreApps = []statusAppInfo{
+	{"Jira Software", "jira-software", "https://jira-software.status.atlassian.com"},
+	{"Jira Service Management", "jira-service-management", "https://jira-service-management.status.atlassian.com"},
+	{"Confluence", "confluence", "https://confluence.status.atlassian.com"},
+	{"Bitbucket", "bitbucket", "https://status.bitbucket.org"},
+	{"Atlassian Migrations", "migrations", "https://migrations.status.atlassian.com"},
+	{"Atlassian Analytics", "analytics", "https://analytics.status.atlassian.com"},
+	{"Rovo", "rovo", "https://rovo.status.atlassian.com"},
+	{"Rovo Dev", "rovodev", "https://rovodev.status.atlassian.com"},
+}
+
 func (v *AppView) drawStatusPanel(ctx widget.Context, canvas widget.Canvas, r geometry.Rect, s appViewStateSnapshot) {
 	radius := float32(14)
 	canvas.DrawRoundRect(r, widget.RGBA8(18, 24, 36, 250), radius)
@@ -1794,26 +1811,16 @@ func (v *AppView) drawStatusPanel(ctx widget.Context, canvas widget.Canvas, r ge
 	canvas.DrawText("Statuspage ↗", extLinkRect, 10, widget.RGBA8(210, 230, 255, 255), false, widget.TextAlignCenter)
 
 	// 3. Application Services Grid (Grouped by Application)
-	gridY := bannerY + bannerH + 16
-	secLblRect := geometry.NewRect(r.Min.X+22, gridY, 200, 14)
+	gridY := bannerY + bannerH + 12
+	secLblRect := geometry.NewRect(r.Min.X+22, gridY, 250, 14)
 	canvas.DrawText("APPLICATION SERVICES", secLblRect, 9, widget.RGBA8(148, 163, 184, 255), true, widget.TextAlignLeft)
 
-	gridCardsY := gridY + 18
-	cardGap := float32(10)
+	gridCardsY := gridY + 16
+	cardGap := float32(8)
 	cardW := (r.Width() - 40 - cardGap) / 2
-	cardH := float32(52)
+	cardH := float32(42)
 
-	coreApps := []struct {
-		Name string
-		Key  string
-	}{
-		{"Jira Software", "jira-software"},
-		{"Jira Service Management", "jira-service-management"},
-		{"Confluence", "confluence"},
-		{"Bitbucket", "bitbucket"},
-	}
-
-	for i, app := range coreApps {
+	for i, app := range atlassianCoreApps {
 		col := float32(i % 2)
 		row := float32(i / 2)
 		cardX := r.Min.X + 20 + col*(cardW+cardGap)
@@ -1823,7 +1830,7 @@ func (v *AppView) drawStatusPanel(ctx widget.Context, canvas widget.Canvas, r ge
 		appInd := status.IndicatorNone
 		appDesc := "Operational"
 		for _, serv := range s.statusReport.Services {
-			if strings.EqualFold(serv.PageID, app.Key) || strings.Contains(strings.ToLower(serv.Name), strings.ToLower(app.Name)) {
+			if strings.EqualFold(serv.Name, app.Name) || strings.EqualFold(serv.PageID, app.Key) || strings.Contains(strings.ToLower(serv.Name), strings.ToLower(app.Name)) {
 				appInd = serv.Indicator
 				if serv.Description != "" {
 					appDesc = serv.Description
@@ -1833,20 +1840,20 @@ func (v *AppView) drawStatusPanel(ctx widget.Context, canvas widget.Canvas, r ge
 		}
 
 		appCol, appGlow := getStatusIndicatorColors(appInd)
-		canvas.DrawRoundRect(appRect, widget.RGBA8(22, 30, 46, 220), 8)
-		canvas.StrokeRoundRect(appRect, widget.RGBA8(255, 255, 255, 30), 8, 1.0)
+		canvas.DrawRoundRect(appRect, widget.RGBA8(22, 30, 46, 220), 7)
+		canvas.StrokeRoundRect(appRect, widget.RGBA8(255, 255, 255, 30), 7, 1.0)
 
-		canvas.DrawCircle(geometry.Pt(appRect.Min.X+16, appRect.Min.Y+18), 7.0, appGlow)
-		canvas.DrawCircle(geometry.Pt(appRect.Min.X+16, appRect.Min.Y+18), 4.0, appCol)
+		canvas.DrawCircle(geometry.Pt(appRect.Min.X+16, appRect.Min.Y+15), 6.5, appGlow)
+		canvas.DrawCircle(geometry.Pt(appRect.Min.X+16, appRect.Min.Y+15), 3.5, appCol)
 
-		tRect := geometry.NewRect(appRect.Min.X+32, appRect.Min.Y+11, appRect.Width()-110, 16)
-		canvas.DrawText(app.Name, tRect, 11, widget.RGBA8(240, 245, 255, 255), true, widget.TextAlignLeft)
+		tRect := geometry.NewRect(appRect.Min.X+30, appRect.Min.Y+6, appRect.Width()-112, 15)
+		canvas.DrawText(app.Name, tRect, 10, widget.RGBA8(240, 245, 255, 255), true, widget.TextAlignLeft)
 
-		dRect := geometry.NewRect(appRect.Min.X+32, appRect.Min.Y+28, appRect.Width()-110, 14)
-		canvas.DrawText(appDesc, dRect, 9, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
+		dRect := geometry.NewRect(appRect.Min.X+30, appRect.Min.Y+22, appRect.Width()-112, 13)
+		canvas.DrawText(appDesc, dRect, 8, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
 
-		badgeW := float32(75)
-		badgeRect := geometry.NewRect(appRect.Max.X-badgeW-10, appRect.Min.Y+14, badgeW, 22)
+		badgeW := float32(72)
+		badgeRect := geometry.NewRect(appRect.Max.X-badgeW-8, appRect.Min.Y+11, badgeW, 20)
 		badgeBg := widget.RGBA8(20, 52, 36, 220)
 		badgeBorder := widget.RGBA8(34, 197, 94, 120)
 		badgeTxt := "Operational"
@@ -1862,72 +1869,73 @@ func (v *AppView) drawStatusPanel(ctx widget.Context, canvas widget.Canvas, r ge
 		}
 		canvas.DrawRoundRect(badgeRect, badgeBg, 4)
 		canvas.StrokeRoundRect(badgeRect, badgeBorder, 4, 1.0)
-		canvas.DrawText(badgeTxt, badgeRect, 9, appCol, true, widget.TextAlignCenter)
+		canvas.DrawText(badgeTxt, badgeRect, 8, appCol, true, widget.TextAlignCenter)
 	}
 
 	// 4. Active Incidents Section
-	incSecY := gridCardsY + 2*(cardH+cardGap) + 12
-	incSecLbl := geometry.NewRect(r.Min.X+22, incSecY, 250, 14)
+	gridRows := float32((len(atlassianCoreApps) + 1) / 2)
+	incSecY := gridCardsY + gridRows*(cardH+cardGap) + 6
+	incSecLbl := geometry.NewRect(r.Min.X+22, incSecY, 280, 14)
 	canvas.DrawText("ACTIVE INCIDENTS & MAINTENANCE NOTICES", incSecLbl, 9, widget.RGBA8(148, 163, 184, 255), true, widget.TextAlignLeft)
 
-	incListY := incSecY + 20
+	incListY := incSecY + 18
 	if len(s.statusReport.ActiveIncidents) == 0 {
-		emptyRect := geometry.NewRect(r.Min.X+20, incListY, r.Width()-40, 68)
+		emptyRect := geometry.NewRect(r.Min.X+20, incListY, r.Width()-40, 52)
 		canvas.DrawRoundRect(emptyRect, widget.RGBA8(16, 24, 36, 180), 8)
 		canvas.StrokeRoundRect(emptyRect, widget.RGBA8(255, 255, 255, 20), 8, 1.0)
 
-		canvas.DrawCircle(geometry.Pt(emptyRect.Min.X+28, emptyRect.Min.Y+34), 8.0, widget.RGBA8(34, 197, 94, 60))
-		canvas.DrawCircle(geometry.Pt(emptyRect.Min.X+28, emptyRect.Min.Y+34), 4.5, widget.RGBA8(34, 197, 94, 255))
+		canvas.DrawCircle(geometry.Pt(emptyRect.Min.X+26, emptyRect.Min.Y+26), 7.0, widget.RGBA8(34, 197, 94, 60))
+		canvas.DrawCircle(geometry.Pt(emptyRect.Min.X+26, emptyRect.Min.Y+26), 4.0, widget.RGBA8(34, 197, 94, 255))
 
-		eTitleRect := geometry.NewRect(emptyRect.Min.X+48, emptyRect.Min.Y+18, emptyRect.Width()-60, 16)
-		canvas.DrawText("No Active Incidents", eTitleRect, 11, widget.RGBA8(230, 240, 255, 255), true, widget.TextAlignLeft)
+		eTitleRect := geometry.NewRect(emptyRect.Min.X+44, emptyRect.Min.Y+11, emptyRect.Width()-55, 15)
+		canvas.DrawText("No Active Incidents", eTitleRect, 10, widget.RGBA8(230, 240, 255, 255), true, widget.TextAlignLeft)
 
-		eSubRect := geometry.NewRect(emptyRect.Min.X+48, emptyRect.Min.Y+36, emptyRect.Width()-60, 14)
-		canvas.DrawText("All Atlassian Cloud services are operating normally with no active disruptions.", eSubRect, 9, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
+		eSubRect := geometry.NewRect(emptyRect.Min.X+44, emptyRect.Min.Y+27, emptyRect.Width()-55, 13)
+		canvas.DrawText("All Atlassian Cloud services are operating normally with no active disruptions.", eSubRect, 8, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
 	} else {
-		maxInc := 3
+		maxInc := 2
 		if len(s.statusReport.ActiveIncidents) < maxInc {
 			maxInc = len(s.statusReport.ActiveIncidents)
 		}
-		incH := float32(66)
+		incH := float32(56)
 		for idx := 0; idx < maxInc; idx++ {
 			inc := s.statusReport.ActiveIncidents[idx]
-			cardY := incListY + float32(idx)*(incH+8)
+			cardY := incListY + float32(idx)*(incH+6)
 			incCardRect := geometry.NewRect(r.Min.X+20, cardY, r.Width()-40, incH)
 
 			canvas.DrawRoundRect(incCardRect, widget.RGBA8(32, 22, 28, 220), 8)
 			canvas.StrokeRoundRect(incCardRect, widget.RGBA8(239, 68, 68, 80), 8, 1.0)
 
-			badgeW := float32(65)
-			badgeRect := geometry.NewRect(incCardRect.Min.X+12, incCardRect.Min.Y+12, badgeW, 18)
+			badgeW := float32(60)
+			badgeRect := geometry.NewRect(incCardRect.Min.X+10, incCardRect.Min.Y+10, badgeW, 16)
 			canvas.DrawRoundRect(badgeRect, widget.RGBA8(239, 68, 68, 200), 3)
 			canvas.DrawText(strings.ToUpper(inc.Impact), badgeRect, 8, widget.RGBA8(255, 255, 255, 255), true, widget.TextAlignCenter)
 
-			titleRect := geometry.NewRect(incCardRect.Min.X+85, incCardRect.Min.Y+12, incCardRect.Width()-180, 16)
-			canvas.DrawText(truncateSummary(inc.Name, 45), titleRect, 11, widget.RGBA8(255, 240, 240, 255), true, widget.TextAlignLeft)
+			titleRect := geometry.NewRect(incCardRect.Min.X+78, incCardRect.Min.Y+10, incCardRect.Width()-170, 15)
+			canvas.DrawText(truncateSummary(inc.Name, 45), titleRect, 10, widget.RGBA8(255, 240, 240, 255), true, widget.TextAlignLeft)
 
 			statusTxt := fmt.Sprintf("Status: %s", inc.Status)
 			if !inc.UpdatedAt.IsZero() {
 				statusTxt += fmt.Sprintf(" • %s", inc.UpdatedAt.Format("15:04 MST"))
 			}
-			stRect := geometry.NewRect(incCardRect.Min.X+12, incCardRect.Min.Y+34, incCardRect.Width()-100, 14)
-			canvas.DrawText(statusTxt, stRect, 9, widget.RGBA8(200, 180, 190, 255), false, widget.TextAlignLeft)
+			stRect := geometry.NewRect(incCardRect.Min.X+10, incCardRect.Min.Y+30, incCardRect.Width()-95, 13)
+			canvas.DrawText(statusTxt, stRect, 8, widget.RGBA8(200, 180, 190, 255), false, widget.TextAlignLeft)
 
 			if inc.URL != "" {
-				linkRect := geometry.NewRect(incCardRect.Max.X-80, incCardRect.Min.Y+22, 70, 22)
+				linkRect := geometry.NewRect(incCardRect.Max.X-75, incCardRect.Min.Y+16, 65, 20)
 				canvas.DrawRoundRect(linkRect, widget.RGBA8(50, 30, 40, 220), 4)
 				canvas.StrokeRoundRect(linkRect, widget.RGBA8(255, 255, 255, 40), 4, 1.0)
-				canvas.DrawText("Details ↗", linkRect, 9, widget.RGBA8(255, 220, 230, 255), false, widget.TextAlignCenter)
+				canvas.DrawText("Details ↗", linkRect, 8, widget.RGBA8(255, 220, 230, 255), false, widget.TextAlignCenter)
 			}
 		}
 	}
 
 	// 5. Footer Row
-	footY := r.Min.Y + r.Height() - 36
-	footTextRect := geometry.NewRect(r.Min.X+22, footY+4, r.Width()-220, 16)
+	footY := r.Min.Y + r.Height() - 34
+	footTextRect := geometry.NewRect(r.Min.X+22, footY+2, r.Width()-210, 15)
 	canvas.DrawText("Official incident feed & RSS updates available at status.atlassian.com", footTextRect, 9, widget.RGBA8(100, 116, 139, 255), false, widget.TextAlignLeft)
 
-	footBtnRect := geometry.NewRect(r.Min.X+r.Width()-185, footY, 165, 24)
+	footBtnRect := geometry.NewRect(r.Min.X+r.Width()-185, footY-1, 165, 22)
 	canvas.DrawRoundRect(footBtnRect, widget.RGBA8(32, 42, 60, 240), 5)
 	canvas.StrokeRoundRect(footBtnRect, widget.RGBA8(255, 255, 255, 40), 5, 1.0)
 	canvas.DrawText("Open status.atlassian.com ↗", footBtnRect, 9, widget.RGBA8(210, 230, 255, 255), false, widget.TextAlignCenter)
@@ -2831,21 +2839,42 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 			return true
 		}
 
+		// Application Service Cards Click -> Direct Statuspage link
+		cardGap := float32(8)
+		cardW := (r.Width() - 40 - cardGap) / 2
+		cardH := float32(42)
+		gridY := bannerY + 48 + 12
+		gridCardsY := gridY + 16
+		for i, app := range atlassianCoreApps {
+			col := float32(i % 2)
+			row := float32(i / 2)
+			cardX := r.Min.X + 20 + col*(cardW+cardGap)
+			cardY := gridCardsY + row*(cardH+cardGap)
+			appRect := geometry.NewRect(cardX, cardY, cardW, cardH)
+			if appRect.Contains(pos) && app.URL != "" {
+				_ = window.OpenURL(app.URL)
+				return true
+			}
+		}
+
 		// Incident shortlink buttons
 		v.mu.Lock()
 		incidents := v.statusReport.ActiveIncidents
 		v.mu.Unlock()
 
-		incListY := bannerY + 48 + 16 + 18 + 2*(52+10) + 12 + 20
-		maxInc := 3
+		gridRows := float32((len(atlassianCoreApps) + 1) / 2)
+		incSecY := gridCardsY + gridRows*(cardH+cardGap) + 6
+		incListY := incSecY + 18
+		maxInc := 2
 		if len(incidents) < maxInc {
 			maxInc = len(incidents)
 		}
+		incH := float32(56)
 		for idx := 0; idx < maxInc; idx++ {
 			inc := incidents[idx]
-			cardY := incListY + float32(idx)*(66+8)
-			incCardRect := geometry.NewRect(r.Min.X+20, cardY, r.Width()-40, 66)
-			linkRect := geometry.NewRect(incCardRect.Max.X-80, incCardRect.Min.Y+22, 70, 22)
+			cardY := incListY + float32(idx)*(incH+6)
+			incCardRect := geometry.NewRect(r.Min.X+20, cardY, r.Width()-40, incH)
+			linkRect := geometry.NewRect(incCardRect.Max.X-75, incCardRect.Min.Y+16, 65, 20)
 			if linkRect.Contains(pos) && inc.URL != "" {
 				_ = window.OpenURL(inc.URL)
 				return true
@@ -2853,8 +2882,8 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		}
 
 		// Footer link button
-		footY := r.Min.Y + r.Height() - 36
-		footBtnRect := geometry.NewRect(r.Min.X+r.Width()-185, footY, 165, 24)
+		footY := r.Min.Y + r.Height() - 34
+		footBtnRect := geometry.NewRect(r.Min.X+r.Width()-185, footY-1, 165, 22)
 		if footBtnRect.Contains(pos) {
 			_ = window.OpenURL("https://status.atlassian.com")
 			return true

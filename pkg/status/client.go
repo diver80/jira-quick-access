@@ -14,6 +14,10 @@ var DefaultServiceEndpoints = map[string]string{
 	"Jira Service Management": "https://jira-service-management.status.atlassian.com",
 	"Confluence":              "https://confluence.status.atlassian.com",
 	"Bitbucket":               "https://status.bitbucket.org",
+	"Atlassian Migrations":    "https://migrations.status.atlassian.com",
+	"Atlassian Analytics":     "https://analytics.status.atlassian.com",
+	"Rovo":                    "https://rovo.status.atlassian.com",
+	"Rovo Dev":                "https://rovodev.status.atlassian.com",
 }
 
 // Client interacts with Atlassian Statuspage REST endpoints.

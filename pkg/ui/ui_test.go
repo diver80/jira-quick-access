@@ -1698,6 +1698,53 @@ func TestStatusEmptyTicketListAndStateRestore(t *testing.T) {
 	}
 }
 
+func TestStatusPanelEightProducts(t *testing.T) {
+	view, _ := createTestAppView()
+	defer view.Close()
+
+	if len(atlassianCoreApps) != 8 {
+		t.Fatalf("expected 8 core apps, got %d", len(atlassianCoreApps))
+	}
+
+	expectedNames := []string{
+		"Jira Software",
+		"Jira Service Management",
+		"Confluence",
+		"Bitbucket",
+		"Atlassian Migrations",
+		"Atlassian Analytics",
+		"Rovo",
+		"Rovo Dev",
+	}
+
+	for i, expected := range expectedNames {
+		if atlassianCoreApps[i].Name != expected {
+			t.Errorf("expected app %d to be %q, got %q", i, expected, atlassianCoreApps[i].Name)
+		}
+		if atlassianCoreApps[i].URL == "" {
+			t.Errorf("expected app %q to have non-empty statuspage URL", expected)
+		}
+	}
+
+	view.OpenStatus()
+	defer view.CloseStatus()
+
+	// Click on one of the product cards in StateExpanded
+	// For instance, the 5th product: "Atlassian Migrations" (row 2, col 0)
+	cardGap := float32(8)
+	_ = (float32(780-110-14) - 40 - cardGap) / 2
+	cardH := float32(42)
+	gridCardsY := float32(8 + 62 + 48 + 12 + 16)
+	cardX := float32(8 + 20)
+	cardY := gridCardsY + 2*(cardH+cardGap)
+
+	handled := view.handleClick(geometry.Pt(cardX+10, cardY+10))
+	if !handled {
+		t.Errorf("expected clicking on product card to be handled")
+	}
+}
+
+
 
 
 
