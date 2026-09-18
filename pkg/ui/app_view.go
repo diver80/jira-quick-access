@@ -675,6 +675,7 @@ func (v *AppView) SetState(newState window.WindowState) {
 	v.state = newState
 	v.hoveredTabIdx = -1
 	v.hoveredSettings = false
+	v.hoveredStatus = false
 	if newState == window.StateFan {
 		v.lastHover = time.Now()
 	} else {
@@ -1047,18 +1048,18 @@ func getStatusBadgeInfo(ind status.Indicator) (icon string, text string, fg widg
 	case status.IndicatorMinor, status.IndicatorMaintenance:
 		return "⚠", "Atlassian Notice",
 			widget.RGBA8(245, 158, 11, 255),
-			widget.RGBA8(56, 38, 16, 230),
-			widget.RGBA8(245, 158, 11, 180)
+			widget.RGBA8(36, 46, 66, 230),
+			widget.RGBA8(255, 255, 255, 45)
 	case status.IndicatorMajor, status.IndicatorCritical:
 		return "⚠", "Atlassian Outage",
 			widget.RGBA8(239, 68, 68, 255),
-			widget.RGBA8(65, 24, 26, 240),
-			widget.RGBA8(239, 68, 68, 200)
+			widget.RGBA8(36, 46, 66, 230),
+			widget.RGBA8(255, 255, 255, 45)
 	default:
 		return "✓", "Atlassian Cloud OK",
 			widget.RGBA8(34, 197, 94, 255),
-			widget.RGBA8(20, 48, 34, 230),
-			widget.RGBA8(34, 197, 94, 160)
+			widget.RGBA8(36, 46, 66, 230),
+			widget.RGBA8(255, 255, 255, 45)
 	}
 }
 
@@ -1108,12 +1109,14 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			topOffset = 31
 			icon, _, fg, bg, border := getStatusBadgeInfo(s.statusReport.OverallIndicator)
 			statBadgeRect := geometry.NewRect(centerX-12, b.Min.Y+7, 24, 18)
-			canvas.DrawRoundRect(statBadgeRect, bg, 5)
-			bCol := border
+			stBg := bg
+			stBorder := border
 			if s.hoveredStatus {
-				bCol = widget.RGBA8(255, 255, 255, 220)
+				stBg = widget.RGBA8(52, 68, 96, 245)
+				stBorder = widget.RGBA8(255, 255, 255, 120)
 			}
-			canvas.StrokeRoundRect(statBadgeRect, bCol, 5, 1.0)
+			canvas.DrawRoundRect(statBadgeRect, stBg, 5)
+			canvas.StrokeRoundRect(statBadgeRect, stBorder, 5, 1.0)
 			canvas.DrawText(icon, statBadgeRect, 11, fg, true, widget.TextAlignCenter)
 
 			// Top Divider Line below global status
@@ -1244,7 +1247,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		setBorder := widget.RGBA8(255, 255, 255, 45)
 		if s.hoveredSettings {
 			setBg = widget.RGBA8(52, 68, 96, 245)
-			setBorder = widget.RGBA8(255, 255, 255, 200)
+			setBorder = widget.RGBA8(255, 255, 255, 120)
 		}
 		setRect := geometry.NewRect(centerX-12, b.Min.Y+h-25, 24, 18)
 		canvas.DrawRoundRect(setRect, setBg, 5)
@@ -1277,9 +1280,10 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			stBorder := border
 			if s.showStatus {
 				stBg = widget.RGBA8(46, 62, 92, 255)
-				stBorder = widget.RGBA8(255, 255, 255, 220)
+				stBorder = widget.RGBA8(255, 255, 255, 120)
 			} else if s.hoveredStatus {
-				stBorder = widget.RGBA8(255, 255, 255, 200)
+				stBg = widget.RGBA8(52, 68, 96, 245)
+				stBorder = widget.RGBA8(255, 255, 255, 120)
 			}
 			canvas.DrawRoundRect(statusTabRect, stBg, 6)
 			canvas.StrokeRoundRect(statusTabRect, stBorder, 6, 1.0)
@@ -1498,9 +1502,10 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		stBorder := border
 		if s.showStatus {
 			stBg = widget.RGBA8(46, 62, 92, 255)
-			stBorder = widget.RGBA8(255, 255, 255, 220)
+			stBorder = widget.RGBA8(255, 255, 255, 120)
 		} else if s.hoveredStatus {
-			stBorder = widget.RGBA8(255, 255, 255, 180)
+			stBg = widget.RGBA8(52, 68, 96, 245)
+			stBorder = widget.RGBA8(255, 255, 255, 120)
 		}
 		canvas.DrawRoundRect(statusBtnRect, stBg, 6)
 		canvas.StrokeRoundRect(statusBtnRect, stBorder, 6, 1.0)
