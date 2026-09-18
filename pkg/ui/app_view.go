@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"jira-quick-access/pkg/jira"
+	"jira-quick-access/pkg/status"
 	"jira-quick-access/pkg/window"
 
 	"github.com/gogpu/ui/event"
@@ -74,53 +76,66 @@ type AppView struct {
 	colorVal    string
 	demoMode    bool
 	debugMode   bool
-	activeField int       // 1..5
+	activeField int       // 1..7
 	cursorPos   int       // Cursor position inside active field
 	selectAll   bool      // If true, all text in active field is selected
 	lastModTime time.Time // Timestamp of last modifier action to prevent duplicate character insertion
 	statusMsg   string
 
+	// Status monitoring
+	showStatus        bool
+	statusClient      *status.Client
+	statusReport      status.StatusReport
+	hoveredStatus     bool
+	statusIntervalVal string
+
 	// Callbacks
-	onRedraw func()
-	onResize func(w, h int)
+	onRedraw       func()
+	onResize       func(w, h int)
+	onConfigReload func()
 }
 
 type appViewStateSnapshot struct {
-	bounds          geometry.Rect
-	state           window.WindowState
-	showSettings    bool
-	dockSide        window.DockSide
-	selectedMonitor int
-	monitors        []window.MonitorInfo
-	alwaysOnTop     bool
-	autoHide        bool
-	isTucked        bool
-	issues          []jira.Issue
-	filteredIssues  []jira.Issue
-	activeIdx       int
-	activeTheme     CardTheme
-	toast           ToastNotification
-	scrollY         float32
-	searchQuery     string
-	searchActive    bool
-	activeInstIdx   int
-	selectedInstIdx int
-	hoveredTabIdx   int
-	hoveredSettings bool
-	instances       []jira.InstanceConfig
-	nameVal         string
-	urlVal          string
-	emailVal        string
-	tokenVal        string
-	jqlVal          string
-	intervalVal     string
-	colorVal        string
-	demoMode        bool
-	debugMode       bool
-	activeField     int
-	cursorPos       int
-	selectAll       bool
-	statusMsg       string
+	bounds            geometry.Rect
+	state             window.WindowState
+	showSettings      bool
+	showStatus        bool
+	statusReport      status.StatusReport
+	hoveredStatus     bool
+	dockSide          window.DockSide
+	selectedMonitor   int
+	monitors          []window.MonitorInfo
+	alwaysOnTop       bool
+	autoHide          bool
+	isTucked          bool
+	issues            []jira.Issue
+	filteredIssues    []jira.Issue
+	activeIdx         int
+	activeTheme       CardTheme
+	toast             ToastNotification
+	scrollY           float32
+	searchQuery       string
+	searchActive      bool
+	activeInstIdx     int
+	selectedInstIdx   int
+	hoveredTabIdx     int
+	hoveredSettings   bool
+	instances         []jira.InstanceConfig
+	nameVal           string
+	urlVal            string
+	emailVal          string
+	tokenVal          string
+	jqlVal            string
+	intervalVal       string
+	statusIntervalVal string
+	colorVal          string
+	demoMode          bool
+	debugMode         bool
+	activeField       int
+	cursorPos         int
+	selectAll         bool
+	statusMsg         string
+	config            jira.Config
 }
 
 func NewAppView(
@@ -128,6 +143,7 @@ func NewAppView(
 	client *jira.Client,
 	onRedraw func(),
 ) *AppView {
+	cfg.ApplyDefaults()
 	cfg.EnsureInstances()
 	if cfg.Instances[0].APIToken == "" || cfg.Instances[0].Email == "" {
 		jira.LoadFromDotEnv(&cfg)
@@ -152,7 +168,10 @@ func NewAppView(
 		selectedInstIdx: 0,
 		demoMode:        cfg.DemoMode,
 		debugMode:       cfg.DebugMode,
-		intervalVal:     fmt.Sprintf("%d", cfg.PollInterval),
+		intervalVal:       fmt.Sprintf("%d", cfg.PollInterval),
+		statusIntervalVal: fmt.Sprintf("%d", cfg.StatusPollInterval),
+		statusClient:      status.NewClient(),
+		statusReport:    status.StatusReport{OverallIndicator: status.IndicatorNone, OverallText: "All Systems Operational"},
 		onRedraw:        onRedraw,
 		ctx:             ctx,
 		cancel:          cancel,
@@ -183,11 +202,13 @@ func NewAppView(
 		v.mu.Lock()
 		st := v.state
 		showSet := v.showSettings
+		showStat := v.showStatus
 		v.mu.Unlock()
 
-		if showSet {
+		if showSet || showStat {
 			v.mu.Lock()
 			v.showSettings = false
+			v.showStatus = false
 			v.mu.Unlock()
 			v.SetState(window.StateFan)
 		} else if st == window.StateExpanded {
@@ -574,6 +595,9 @@ func (v *AppView) snapshot() appViewStateSnapshot {
 		bounds:          v.Bounds(),
 		state:           v.state,
 		showSettings:    v.showSettings,
+		showStatus:      v.showStatus,
+		statusReport:    v.statusReport,
+		hoveredStatus:   v.hoveredStatus,
 		dockSide:        v.dockSide,
 		selectedMonitor: v.selectedMonitor,
 		monitors:        monitors,
@@ -598,18 +622,29 @@ func (v *AppView) snapshot() appViewStateSnapshot {
 		emailVal:        v.emailVal,
 		tokenVal:        v.tokenVal,
 		jqlVal:          v.jqlVal,
-		intervalVal:     v.intervalVal,
-		colorVal:        v.colorVal,
-		demoMode:        v.demoMode,
-		debugMode:       v.debugMode,
-		activeField:     v.activeField,
-		cursorPos:       v.cursorPos,
-		selectAll:       v.selectAll,
-		statusMsg:       v.statusMsg,
+		intervalVal:       v.intervalVal,
+		statusIntervalVal: v.statusIntervalVal,
+		colorVal:          v.colorVal,
+		demoMode:          v.demoMode,
+		debugMode:         v.debugMode,
+		activeField:       v.activeField,
+		cursorPos:         v.cursorPos,
+		selectAll:         v.selectAll,
+		statusMsg:         v.statusMsg,
+		config:            v.config,
 	}
 }
 
 func (v *AppView) computeSize(st window.WindowState) (int, int) {
+	v.mu.Lock()
+	showSet := v.showSettings
+	showStat := v.showStatus
+	v.mu.Unlock()
+
+	if showSet || showStat {
+		return 780, 580
+	}
+
 	switch st {
 	case window.StateRest:
 		return 36, 224
@@ -647,6 +682,7 @@ func (v *AppView) SetState(newState window.WindowState) {
 		v.searchActive = false
 	}
 	showSettings := v.showSettings
+	showStatus := v.showStatus
 	v.mu.Unlock()
 
 	if newState == window.StateRest {
@@ -672,7 +708,7 @@ func (v *AppView) SetState(newState window.WindowState) {
 		onResize(w, h)
 	}
 
-	if newState == window.StateExpanded && !showSettings {
+	if newState == window.StateExpanded && !showSettings && !showStatus {
 		window.SetMobileWebViewVisible(true, w, h)
 		v.loadActiveTicketInMobileView()
 	} else {
@@ -782,6 +818,7 @@ func (v *AppView) Expand(tabIdx int) {
 	v.activeIdx = tabIdx
 	v.activeTheme = GetTicketTheme(tabIdx)
 	v.showSettings = false
+	v.showStatus = false
 	v.mu.Unlock()
 	v.SetState(window.StateExpanded)
 }
@@ -789,6 +826,7 @@ func (v *AppView) Expand(tabIdx int) {
 func (v *AppView) OpenSettings() {
 	v.mu.Lock()
 	v.showSettings = true
+	v.showStatus = false
 	v.loadInstanceFieldsLocked(v.selectedInstIdx)
 	v.statusMsg = ""
 	v.mu.Unlock()
@@ -798,10 +836,96 @@ func (v *AppView) OpenSettings() {
 func (v *AppView) ToggleSettings() {
 	v.mu.Lock()
 	v.showSettings = !v.showSettings
+	if v.showSettings {
+		v.showStatus = false
+	}
 	v.loadInstanceFieldsLocked(v.selectedInstIdx)
 	v.statusMsg = ""
+	st := v.showSettings
+	v.mu.Unlock()
+	if st {
+		v.SetState(window.StateExpanded)
+	} else {
+		v.SetState(window.StateFan)
+	}
+}
+
+func (v *AppView) IsStatusOpen() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.showStatus
+}
+
+func (v *AppView) OpenStatus() {
+	v.mu.Lock()
+	v.showStatus = true
+	v.showSettings = false
 	v.mu.Unlock()
 	v.SetState(window.StateExpanded)
+}
+
+func (v *AppView) CloseStatus() {
+	v.mu.Lock()
+	v.showStatus = false
+	v.mu.Unlock()
+	v.SetState(window.StateFan)
+}
+
+func (v *AppView) ToggleStatus() {
+	v.mu.Lock()
+	v.showStatus = !v.showStatus
+	if v.showStatus {
+		v.showSettings = false
+	}
+	st := v.showStatus
+	v.mu.Unlock()
+	if st {
+		v.SetState(window.StateExpanded)
+	} else {
+		v.SetState(window.StateFan)
+	}
+}
+
+func (v *AppView) RefreshStatus() {
+	v.mu.Lock()
+	if v.ctx == nil || v.ctx.Err() != nil {
+		v.mu.Unlock()
+		return
+	}
+	client := v.statusClient
+	enabled := v.config.StatusCheckEnabled
+	if client == nil || !enabled {
+		v.mu.Unlock()
+		return
+	}
+	v.wg.Add(1)
+	v.mu.Unlock()
+
+	go func() {
+		defer v.wg.Done()
+		rep, err := client.FetchReport()
+		select {
+		case <-v.ctx.Done():
+			return
+		default:
+		}
+
+		v.mu.Lock()
+		v.statusReport = rep
+		if err != nil {
+			v.toast = NewToast(fmt.Sprintf("Status error: %v", err))
+		}
+		v.mu.Unlock()
+		if v.onRedraw != nil {
+			v.onRedraw()
+		}
+	}()
+}
+
+func (v *AppView) SetOnConfigReload(cb func()) {
+	v.mu.Lock()
+	v.onConfigReload = cb
+	v.mu.Unlock()
 }
 
 func (v *AppView) RefreshIssues() {
@@ -918,6 +1042,17 @@ func truncateSummary(text string, maxLen int) string {
 	return string(runes[:maxLen-1]) + "…"
 }
 
+func getStatusIndicatorColors(ind status.Indicator) (widget.Color, widget.Color) {
+	switch ind {
+	case status.IndicatorMinor, status.IndicatorMaintenance:
+		return widget.RGBA8(245, 158, 11, 255), widget.RGBA8(245, 158, 11, 75)
+	case status.IndicatorMajor, status.IndicatorCritical:
+		return widget.RGBA8(239, 68, 68, 255), widget.RGBA8(239, 68, 68, 85)
+	default:
+		return widget.RGBA8(34, 197, 94, 255), widget.RGBA8(34, 197, 94, 70)
+	}
+}
+
 func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	s := v.snapshot()
 	expectedW, expectedH := v.computeSize(s.state)
@@ -941,15 +1076,26 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 
 		// 3. Subtle top drag handle grip dots (···)
 		centerX := b.Min.X + w/2
-		canvas.DrawCircle(geometry.Pt(centerX-5, b.Min.Y+6), 1.2, widget.RGBA8(255, 255, 255, 120))
-		canvas.DrawCircle(geometry.Pt(centerX, b.Min.Y+6), 1.2, widget.RGBA8(255, 255, 255, 120))
-		canvas.DrawCircle(geometry.Pt(centerX+5, b.Min.Y+6), 1.2, widget.RGBA8(255, 255, 255, 120))
+		canvas.DrawCircle(geometry.Pt(centerX-4, b.Min.Y+4.5), 1.0, widget.RGBA8(255, 255, 255, 100))
+		canvas.DrawCircle(geometry.Pt(centerX, b.Min.Y+4.5), 1.0, widget.RGBA8(255, 255, 255, 100))
+		canvas.DrawCircle(geometry.Pt(centerX+4, b.Min.Y+4.5), 1.0, widget.RGBA8(255, 255, 255, 100))
+
+		// 4. Top Status Beacon Indicator (Atlassian Status Health)
+		if s.config.StatusCheckEnabled {
+			statCol, statGlow := getStatusIndicatorColors(s.statusReport.OverallIndicator)
+			beaconCenter := geometry.Pt(centerX, b.Min.Y+14)
+			canvas.DrawCircle(beaconCenter, 6.0, statGlow)
+			canvas.DrawCircle(beaconCenter, 3.5, statCol)
+			if s.hoveredStatus {
+				canvas.StrokeCircle(beaconCenter, 7.5, widget.RGBA8(255, 255, 255, 180), 1.2)
+			}
+		}
 
 		instCount := len(s.instances)
 		if instCount == 0 {
 			instCount = 1
 		}
-		usableH := h - 34 // Reserve 34px for bottom divider and settings icon
+		usableH := h - 48 // Reserve 24px top for status beacon and 24px bottom for settings
 		instSectionH := usableH / float32(instCount)
 
 		// Calculate maxCount across instances to scale proportions (e.g. 23)
@@ -967,7 +1113,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		}
 
 		for idx, inst := range s.instances {
-			secY := b.Min.Y + float32(8+float32(idx)*instSectionH)
+			secY := b.Min.Y + float32(22+float32(idx)*instSectionH)
 
 			var instIssues []jira.Issue
 			for _, iss := range s.issues {
@@ -1099,7 +1245,18 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		canvas.StrokeRoundRect(instHeaderRect, widget.RGBA8(255, 255, 255, 40), 5, 1.0)
 
 		canvas.DrawCircle(geometry.Pt(b.Min.X+16, b.Min.Y+19), 3.5, instBeaconColor)
-		canvas.DrawText(instName, geometry.NewRect(b.Min.X+22, b.Min.Y+12, w-30, 14), 10, widget.RGBA8(235, 245, 255, 255), true, widget.TextAlignCenter)
+		canvas.DrawText(instName, geometry.NewRect(b.Min.X+26, b.Min.Y+12, w-52, 14), 10, widget.RGBA8(235, 245, 255, 255), true, widget.TextAlignCenter)
+
+		// Top right status dot in Fan header
+		if s.config.StatusCheckEnabled {
+			statCol, statGlow := getStatusIndicatorColors(s.statusReport.OverallIndicator)
+			statCenter := geometry.Pt(b.Min.X+w-18, b.Min.Y+19)
+			canvas.DrawCircle(statCenter, 5.5, statGlow)
+			canvas.DrawCircle(statCenter, 3.5, statCol)
+			if s.hoveredStatus {
+				canvas.StrokeCircle(statCenter, 6.5, widget.RGBA8(255, 255, 255, 180), 1.0)
+			}
+		}
 
 		// 3. Search Bar with Clear Button & Blinking Cursor
 		searchRect := geometry.NewRect(b.Min.X+7, b.Min.Y+34, w-14, 22)
@@ -1281,6 +1438,26 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	canvas.StrokeRoundRect(closeBtnRect, widget.RGBA8(255, 255, 255, 140), 6, 1.0)
 	canvas.DrawText("✕", closeBtnRect, 10, widget.RGBA8(255, 255, 255, 240), true, widget.TextAlignCenter)
 
+	// Top status indicator button on the dock shelf
+	if s.config.StatusCheckEnabled {
+		statusBtnRect := geometry.NewRect(tabStartX+8, b.Min.Y+12, 24, 22)
+		statusBg := widget.RGBA8(28, 38, 58, 240)
+		statusBorder := widget.RGBA8(255, 255, 255, 80)
+		if s.showStatus {
+			statusBg = widget.RGBA8(46, 62, 92, 255)
+			statusBorder = widget.RGBA8(255, 255, 255, 220)
+		} else if s.hoveredStatus {
+			statusBorder = widget.RGBA8(255, 255, 255, 180)
+		}
+		canvas.DrawRoundRect(statusBtnRect, statusBg, 6)
+		canvas.StrokeRoundRect(statusBtnRect, statusBorder, 6, 1.0)
+
+		statCol, statGlow := getStatusIndicatorColors(s.statusReport.OverallIndicator)
+		sDot := geometry.Pt(statusBtnRect.Min.X+12, statusBtnRect.Min.Y+11)
+		canvas.DrawCircle(sDot, 5.0, statGlow)
+		canvas.DrawCircle(sDot, 3.5, statCol)
+	}
+
 	// Draw side tabs inside the dock shelf with strict bounds clipping
 	tabMinY := b.Min.Y + float32(40)
 	tabMaxY := b.Min.Y + h - float32(56)
@@ -1393,8 +1570,11 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	setTxtRect := geometry.NewRect(tabStartX+4, settingsTabY+9, tabBarWidth-18, 16)
 	canvas.DrawText("Settings", setTxtRect, 10, widget.RGBA8(230, 240, 255, 255), true, widget.TextAlignCenter)
 
-	// Settings Overlay (if active)
-	if s.showSettings {
+	// Overlays (if active)
+	if s.showStatus {
+		cardRect := geometry.NewRect(cardStartX, b.Min.Y+8, cardAreaWidth, h-16)
+		v.drawStatusPanel(ctx, canvas, cardRect, s)
+	} else if s.showSettings {
 		cardRect := geometry.NewRect(cardStartX, b.Min.Y+8, cardAreaWidth, h-16)
 		v.drawSettingsOverlay(ctx, canvas, cardRect, s)
 	}
@@ -1423,6 +1603,220 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		tTxtRect := geometry.NewRect(toastX+10, toastY+7, toastW-20, 16)
 		canvas.DrawText(msg, tTxtRect, 11, widget.RGBA8(245, 250, 255, 255), true, widget.TextAlignCenter)
 	}
+}
+
+func (v *AppView) drawStatusPanel(ctx widget.Context, canvas widget.Canvas, r geometry.Rect, s appViewStateSnapshot) {
+	radius := float32(14)
+	canvas.DrawRoundRect(r, widget.RGBA8(18, 24, 36, 250), radius)
+	canvas.StrokeRoundRect(r, widget.RGBA8(255, 255, 255, 70), radius, 1.0)
+
+	// 1. Top Header
+	hdrRect := geometry.NewRect(r.Min.X+22, r.Min.Y+16, 280, 22)
+	canvas.DrawText("Atlassian Cloud Status", hdrRect, 15, widget.RGBA8(245, 250, 255, 255), true, widget.TextAlignLeft)
+
+	subHdrRect := geometry.NewRect(r.Min.X+22, r.Min.Y+38, 300, 14)
+	canvas.DrawText("Live status & incident telemetry from status.atlassian.com", subHdrRect, 9, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
+
+	// Refresh button
+	refRect := geometry.NewRect(r.Min.X+r.Width()-140, r.Min.Y+14, 76, 26)
+	canvas.DrawRoundRect(refRect, widget.RGBA8(40, 52, 74, 240), 5)
+	canvas.StrokeRoundRect(refRect, widget.RGBA8(255, 255, 255, 60), 5, 1.0)
+	canvas.DrawText("↻ Refresh", refRect, 10, widget.RGBA8(225, 240, 255, 255), false, widget.TextAlignCenter)
+
+	// Close button
+	closeRect := geometry.NewRect(r.Min.X+r.Width()-54, r.Min.Y+14, 40, 26)
+	canvas.DrawRoundRect(closeRect, widget.RGBA8(38, 48, 68, 240), 5)
+	canvas.StrokeRoundRect(closeRect, widget.RGBA8(255, 255, 255, 60), 5, 1.0)
+	canvas.DrawText("✕", closeRect, 11, widget.RGBA8(240, 245, 255, 255), true, widget.TextAlignCenter)
+
+	// 2. Global Status Health Banner
+	bannerY := r.Min.Y + 62
+	bannerH := float32(48)
+	bannerRect := geometry.NewRect(r.Min.X+20, bannerY, r.Width()-40, bannerH)
+
+	statCol, statGlow := getStatusIndicatorColors(s.statusReport.OverallIndicator)
+	bannerBg := widget.RGBA8(20, 48, 36, 220)
+	bannerBorder := widget.RGBA8(34, 197, 94, 160)
+	statusTitle := "All Systems Operational"
+
+	switch s.statusReport.OverallIndicator {
+	case status.IndicatorMinor, status.IndicatorMaintenance:
+		bannerBg = widget.RGBA8(55, 42, 18, 220)
+		bannerBorder = widget.RGBA8(245, 158, 11, 160)
+		statusTitle = "Active Minor Service Outage / Maintenance"
+	case status.IndicatorMajor, status.IndicatorCritical:
+		bannerBg = widget.RGBA8(65, 22, 26, 220)
+		bannerBorder = widget.RGBA8(239, 68, 68, 180)
+		statusTitle = "Major Service Outage Detected"
+	}
+	if s.statusReport.OverallText != "" && s.statusReport.OverallIndicator != status.IndicatorNone {
+		statusTitle = s.statusReport.OverallText
+	}
+
+	canvas.DrawRoundRect(bannerRect, bannerBg, 8)
+	canvas.StrokeRoundRect(bannerRect, bannerBorder, 8, 1.0)
+
+	bannerBeaconCenter := geometry.Pt(bannerRect.Min.X+22, bannerRect.Min.Y+24)
+	canvas.DrawCircle(bannerBeaconCenter, 9.0, statGlow)
+	canvas.DrawCircle(bannerBeaconCenter, 5.5, statCol)
+
+	bTitleRect := geometry.NewRect(bannerRect.Min.X+40, bannerRect.Min.Y+9, bannerRect.Width()-180, 18)
+	canvas.DrawText(statusTitle, bTitleRect, 13, widget.RGBA8(245, 250, 255, 255), true, widget.TextAlignLeft)
+
+	lastCheckText := "Checked just now"
+	if !s.statusReport.LastChecked.IsZero() {
+		lastCheckText = fmt.Sprintf("Checked: %s", s.statusReport.LastChecked.Format("15:04:05"))
+	}
+	if s.statusReport.Error != "" {
+		lastCheckText = fmt.Sprintf("Notice: %s", s.statusReport.Error)
+	}
+	bTimeRect := geometry.NewRect(bannerRect.Min.X+40, bannerRect.Min.Y+28, bannerRect.Width()-180, 14)
+	canvas.DrawText(lastCheckText, bTimeRect, 9, widget.RGBA8(180, 195, 215, 255), false, widget.TextAlignLeft)
+
+	// Direct link button on banner
+	extLinkRect := geometry.NewRect(bannerRect.Max.X-135, bannerRect.Min.Y+12, 122, 24)
+	canvas.DrawRoundRect(extLinkRect, widget.RGBA8(30, 42, 60, 220), 4)
+	canvas.StrokeRoundRect(extLinkRect, widget.RGBA8(255, 255, 255, 40), 4, 1.0)
+	canvas.DrawText("Statuspage ↗", extLinkRect, 10, widget.RGBA8(210, 230, 255, 255), false, widget.TextAlignCenter)
+
+	// 3. Application Services Grid (Grouped by Application)
+	gridY := bannerY + bannerH + 16
+	secLblRect := geometry.NewRect(r.Min.X+22, gridY, 200, 14)
+	canvas.DrawText("APPLICATION SERVICES", secLblRect, 9, widget.RGBA8(148, 163, 184, 255), true, widget.TextAlignLeft)
+
+	gridCardsY := gridY + 18
+	cardGap := float32(10)
+	cardW := (r.Width() - 40 - cardGap) / 2
+	cardH := float32(52)
+
+	coreApps := []struct {
+		Name string
+		Key  string
+	}{
+		{"Jira Software", "jira-software"},
+		{"Jira Service Management", "jira-service-management"},
+		{"Confluence", "confluence"},
+		{"Bitbucket", "bitbucket"},
+	}
+
+	for i, app := range coreApps {
+		col := float32(i % 2)
+		row := float32(i / 2)
+		cardX := r.Min.X + 20 + col*(cardW+cardGap)
+		cardY := gridCardsY + row*(cardH+cardGap)
+		appRect := geometry.NewRect(cardX, cardY, cardW, cardH)
+
+		appInd := status.IndicatorNone
+		appDesc := "Operational"
+		for _, serv := range s.statusReport.Services {
+			if strings.EqualFold(serv.PageID, app.Key) || strings.Contains(strings.ToLower(serv.Name), strings.ToLower(app.Name)) {
+				appInd = serv.Indicator
+				if serv.Description != "" {
+					appDesc = serv.Description
+				}
+				break
+			}
+		}
+
+		appCol, appGlow := getStatusIndicatorColors(appInd)
+		canvas.DrawRoundRect(appRect, widget.RGBA8(22, 30, 46, 220), 8)
+		canvas.StrokeRoundRect(appRect, widget.RGBA8(255, 255, 255, 30), 8, 1.0)
+
+		canvas.DrawCircle(geometry.Pt(appRect.Min.X+16, appRect.Min.Y+18), 7.0, appGlow)
+		canvas.DrawCircle(geometry.Pt(appRect.Min.X+16, appRect.Min.Y+18), 4.0, appCol)
+
+		tRect := geometry.NewRect(appRect.Min.X+32, appRect.Min.Y+11, appRect.Width()-110, 16)
+		canvas.DrawText(app.Name, tRect, 11, widget.RGBA8(240, 245, 255, 255), true, widget.TextAlignLeft)
+
+		dRect := geometry.NewRect(appRect.Min.X+32, appRect.Min.Y+28, appRect.Width()-110, 14)
+		canvas.DrawText(appDesc, dRect, 9, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
+
+		badgeW := float32(75)
+		badgeRect := geometry.NewRect(appRect.Max.X-badgeW-10, appRect.Min.Y+14, badgeW, 22)
+		badgeBg := widget.RGBA8(20, 52, 36, 220)
+		badgeBorder := widget.RGBA8(34, 197, 94, 120)
+		badgeTxt := "Operational"
+		if appInd != status.IndicatorNone {
+			badgeBg = widget.RGBA8(58, 38, 18, 220)
+			badgeBorder = widget.RGBA8(245, 158, 11, 140)
+			badgeTxt = "Notice"
+			if appInd == status.IndicatorMajor || appInd == status.IndicatorCritical {
+				badgeBg = widget.RGBA8(65, 24, 28, 220)
+				badgeBorder = widget.RGBA8(239, 68, 68, 160)
+				badgeTxt = "Outage"
+			}
+		}
+		canvas.DrawRoundRect(badgeRect, badgeBg, 4)
+		canvas.StrokeRoundRect(badgeRect, badgeBorder, 4, 1.0)
+		canvas.DrawText(badgeTxt, badgeRect, 9, appCol, true, widget.TextAlignCenter)
+	}
+
+	// 4. Active Incidents Section
+	incSecY := gridCardsY + 2*(cardH+cardGap) + 12
+	incSecLbl := geometry.NewRect(r.Min.X+22, incSecY, 250, 14)
+	canvas.DrawText("ACTIVE INCIDENTS & MAINTENANCE NOTICES", incSecLbl, 9, widget.RGBA8(148, 163, 184, 255), true, widget.TextAlignLeft)
+
+	incListY := incSecY + 20
+	if len(s.statusReport.ActiveIncidents) == 0 {
+		emptyRect := geometry.NewRect(r.Min.X+20, incListY, r.Width()-40, 68)
+		canvas.DrawRoundRect(emptyRect, widget.RGBA8(16, 24, 36, 180), 8)
+		canvas.StrokeRoundRect(emptyRect, widget.RGBA8(255, 255, 255, 20), 8, 1.0)
+
+		canvas.DrawCircle(geometry.Pt(emptyRect.Min.X+28, emptyRect.Min.Y+34), 8.0, widget.RGBA8(34, 197, 94, 60))
+		canvas.DrawCircle(geometry.Pt(emptyRect.Min.X+28, emptyRect.Min.Y+34), 4.5, widget.RGBA8(34, 197, 94, 255))
+
+		eTitleRect := geometry.NewRect(emptyRect.Min.X+48, emptyRect.Min.Y+18, emptyRect.Width()-60, 16)
+		canvas.DrawText("No Active Incidents", eTitleRect, 11, widget.RGBA8(230, 240, 255, 255), true, widget.TextAlignLeft)
+
+		eSubRect := geometry.NewRect(emptyRect.Min.X+48, emptyRect.Min.Y+36, emptyRect.Width()-60, 14)
+		canvas.DrawText("All Atlassian Cloud services are operating normally with no active disruptions.", eSubRect, 9, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
+	} else {
+		maxInc := 3
+		if len(s.statusReport.ActiveIncidents) < maxInc {
+			maxInc = len(s.statusReport.ActiveIncidents)
+		}
+		incH := float32(66)
+		for idx := 0; idx < maxInc; idx++ {
+			inc := s.statusReport.ActiveIncidents[idx]
+			cardY := incListY + float32(idx)*(incH+8)
+			incCardRect := geometry.NewRect(r.Min.X+20, cardY, r.Width()-40, incH)
+
+			canvas.DrawRoundRect(incCardRect, widget.RGBA8(32, 22, 28, 220), 8)
+			canvas.StrokeRoundRect(incCardRect, widget.RGBA8(239, 68, 68, 80), 8, 1.0)
+
+			badgeW := float32(65)
+			badgeRect := geometry.NewRect(incCardRect.Min.X+12, incCardRect.Min.Y+12, badgeW, 18)
+			canvas.DrawRoundRect(badgeRect, widget.RGBA8(239, 68, 68, 200), 3)
+			canvas.DrawText(strings.ToUpper(inc.Impact), badgeRect, 8, widget.RGBA8(255, 255, 255, 255), true, widget.TextAlignCenter)
+
+			titleRect := geometry.NewRect(incCardRect.Min.X+85, incCardRect.Min.Y+12, incCardRect.Width()-180, 16)
+			canvas.DrawText(truncateSummary(inc.Name, 45), titleRect, 11, widget.RGBA8(255, 240, 240, 255), true, widget.TextAlignLeft)
+
+			statusTxt := fmt.Sprintf("Status: %s", inc.Status)
+			if !inc.UpdatedAt.IsZero() {
+				statusTxt += fmt.Sprintf(" • %s", inc.UpdatedAt.Format("15:04 MST"))
+			}
+			stRect := geometry.NewRect(incCardRect.Min.X+12, incCardRect.Min.Y+34, incCardRect.Width()-100, 14)
+			canvas.DrawText(statusTxt, stRect, 9, widget.RGBA8(200, 180, 190, 255), false, widget.TextAlignLeft)
+
+			if inc.URL != "" {
+				linkRect := geometry.NewRect(incCardRect.Max.X-80, incCardRect.Min.Y+22, 70, 22)
+				canvas.DrawRoundRect(linkRect, widget.RGBA8(50, 30, 40, 220), 4)
+				canvas.StrokeRoundRect(linkRect, widget.RGBA8(255, 255, 255, 40), 4, 1.0)
+				canvas.DrawText("Details ↗", linkRect, 9, widget.RGBA8(255, 220, 230, 255), false, widget.TextAlignCenter)
+			}
+		}
+	}
+
+	// 5. Footer Row
+	footY := r.Min.Y + r.Height() - 36
+	footTextRect := geometry.NewRect(r.Min.X+22, footY+4, r.Width()-220, 16)
+	canvas.DrawText("Official incident feed & RSS updates available at status.atlassian.com", footTextRect, 9, widget.RGBA8(100, 116, 139, 255), false, widget.TextAlignLeft)
+
+	footBtnRect := geometry.NewRect(r.Min.X+r.Width()-185, footY, 165, 24)
+	canvas.DrawRoundRect(footBtnRect, widget.RGBA8(32, 42, 60, 240), 5)
+	canvas.StrokeRoundRect(footBtnRect, widget.RGBA8(255, 255, 255, 40), 5, 1.0)
+	canvas.DrawText("Open status.atlassian.com ↗", footBtnRect, 9, widget.RGBA8(210, 230, 255, 255), false, widget.TextAlignCenter)
 }
 
 func (v *AppView) drawSettingsOverlay(ctx widget.Context, canvas widget.Canvas, r geometry.Rect, s appViewStateSnapshot) {
@@ -1663,6 +2057,72 @@ func (v *AppView) drawSettingsOverlay(ctx widget.Context, canvas widget.Canvas, 
 	canvas.DrawRoundRect(ahRect, ahBg, 4)
 	canvas.StrokeRoundRect(ahRect, ahBorder, 4, 1.0)
 	canvas.DrawText(ahTxt, ahRect, 10, widget.RGBA8(240, 245, 255, 255), false, widget.TextAlignCenter)
+
+	// 6. Background Sync & Atlassian Status Monitoring
+	syncSecY := row2Y + 34
+	canvas.DrawLine(geometry.Pt(r.Min.X+20, syncSecY), geometry.Pt(r.Min.X+r.Width()-20, syncSecY), widget.RGBA8(255, 255, 255, 30), 1.0)
+
+	syncLblRect := geometry.NewRect(r.Min.X+20, syncSecY+6, 320, 14)
+	canvas.DrawText("Background Sync & Atlassian Health Monitoring", syncLblRect, 10, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
+
+	syncRowY := syncSecY + 24
+
+	// Atlassian Status Check Toggle
+	statusToggleRect := geometry.NewRect(r.Min.X+20, syncRowY, 175, 24)
+	statBg := widget.RGBA8(32, 40, 56, 255)
+	statBorder := widget.RGBA8(255, 255, 255, 30)
+	statTxt := "✕ Status Check: OFF"
+	if s.config.StatusCheckEnabled {
+		statBg = widget.RGBA8(16, 185, 129, 190)
+		statBorder = widget.RGBA8(255, 255, 255, 170)
+		statTxt = "✓ Atlassian Status: ON"
+	}
+	canvas.DrawRoundRect(statusToggleRect, statBg, 4)
+	canvas.StrokeRoundRect(statusToggleRect, statBorder, 4, 1.0)
+	canvas.DrawText(statTxt, statusToggleRect, 10, widget.RGBA8(240, 245, 255, 255), false, widget.TextAlignCenter)
+
+	// Jira Sync Interval (Field 6)
+	syncLbl := geometry.NewRect(r.Min.X+205, syncRowY+5, 60, 14)
+	canvas.DrawText("Sync (s):", syncLbl, 9, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
+
+	syncInpRect := geometry.NewRect(r.Min.X+260, syncRowY, 60, 24)
+	syncInpBg := widget.RGBA8(14, 18, 26, 255)
+	syncInpBorder := widget.RGBA8(255, 255, 255, 20)
+	if s.activeField == 6 {
+		syncInpBg = widget.RGBA8(22, 28, 42, 255)
+		syncInpBorder = ColorStatusToDo
+	}
+	canvas.DrawRoundRect(syncInpRect, syncInpBg, 4)
+	canvas.StrokeRoundRect(syncInpRect, syncInpBorder, 4, 1.0)
+	canvas.DrawText(s.intervalVal, geometry.NewRect(syncInpRect.Min.X+4, syncInpRect.Min.Y+5, syncInpRect.Width()-8, 14), 11, widget.RGBA8(240, 245, 255, 255), false, widget.TextAlignCenter)
+
+	// Status Poll Interval (Field 7)
+	statLbl := geometry.NewRect(r.Min.X+330, syncRowY+5, 65, 14)
+	canvas.DrawText("Status (s):", statLbl, 9, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
+
+	statInpRect := geometry.NewRect(r.Min.X+395, syncRowY, 60, 24)
+	statInpBg := widget.RGBA8(14, 18, 26, 255)
+	statInpBorder := widget.RGBA8(255, 255, 255, 20)
+	if s.activeField == 7 {
+		statInpBg = widget.RGBA8(22, 28, 42, 255)
+		statInpBorder = ColorStatusToDo
+	}
+	canvas.DrawRoundRect(statInpRect, statInpBg, 4)
+	canvas.StrokeRoundRect(statInpRect, statInpBorder, 4, 1.0)
+	canvas.DrawText(s.statusIntervalVal, geometry.NewRect(statInpRect.Min.X+4, statInpRect.Min.Y+5, statInpRect.Width()-8, 14), 11, widget.RGBA8(240, 245, 255, 255), false, widget.TextAlignCenter)
+
+	// Presets: [1m] [5m] [15m]
+	p1Rect := geometry.NewRect(r.Min.X+468, syncRowY, 36, 24)
+	canvas.DrawRoundRect(p1Rect, widget.RGBA8(34, 44, 64, 255), 4)
+	canvas.DrawText("1m", p1Rect, 9, widget.RGBA8(210, 230, 255, 255), false, widget.TextAlignCenter)
+
+	p5Rect := geometry.NewRect(r.Min.X+508, syncRowY, 36, 24)
+	canvas.DrawRoundRect(p5Rect, widget.RGBA8(34, 44, 64, 255), 4)
+	canvas.DrawText("5m", p5Rect, 9, widget.RGBA8(210, 230, 255, 255), false, widget.TextAlignCenter)
+
+	p15Rect := geometry.NewRect(r.Min.X+548, syncRowY, 38, 24)
+	canvas.DrawRoundRect(p15Rect, widget.RGBA8(34, 44, 64, 255), 4)
+	canvas.DrawText("15m", p15Rect, 9, widget.RGBA8(210, 230, 255, 255), false, widget.TextAlignCenter)
 
 
 	// Status Message
@@ -1959,6 +2419,10 @@ func (v *AppView) getActiveTargetLocked() *string {
 		return &v.tokenVal
 	case 5:
 		return &v.jqlVal
+	case 6:
+		return &v.intervalVal
+	case 7:
+		return &v.statusIntervalVal
 	default:
 		return nil
 	}
@@ -1969,6 +2433,8 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 	st := v.state
 	allIssues := v.issues
 	showSettings := v.showSettings
+	showStatus := v.showStatus
+	statusEnabled := v.config.StatusCheckEnabled
 	scrollY := v.scrollY
 	activeIdx := v.activeIdx
 	v.mu.Unlock()
@@ -1982,7 +2448,11 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 
 	// REST STATE: Click affordances
 	if st == window.StateRest {
-		if pos.Y <= b.Min.Y+14 {
+		if statusEnabled && pos.Y >= b.Min.Y+6 && pos.Y <= b.Min.Y+24 {
+			v.ToggleStatus()
+			return true
+		}
+		if pos.Y <= b.Min.Y+6 {
 			v.StartDrag()
 			return true
 		}
@@ -1996,6 +2466,12 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 
 	// 1. Fan State Clicks
 	if st == window.StateFan {
+		// Top right status dot click in Fan
+		if statusEnabled && pos.X >= b.Min.X+w-28 && pos.Y >= b.Min.Y+6 && pos.Y <= b.Min.Y+30 {
+			v.ToggleStatus()
+			return true
+		}
+
 		if pos.Y <= b.Min.Y+12 {
 			v.StartDrag()
 			return true
@@ -2091,6 +2567,13 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		return true
 	}
 
+	// Top shelf status affordance
+	statusBtnRect := geometry.NewRect(tabStartX+8, b.Min.Y+12, 24, 22)
+	if statusEnabled && statusBtnRect.Contains(pos) {
+		v.ToggleStatus()
+		return true
+	}
+
 	settingsTabRect := geometry.NewRect(tabStartX+2, b.Min.Y+h-48, tabBarWidth-14, 34)
 	if settingsTabRect.Contains(pos) {
 		v.ToggleSettings()
@@ -2112,7 +2595,7 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		if tabRect.Contains(pos) {
 			for origIdx, oIss := range allIssues {
 				if oIss.Key == iss.Key {
-					if activeIdx == origIdx && !showSettings {
+					if activeIdx == origIdx && !showSettings && !showStatus {
 						v.SetState(window.StateFan)
 						return true
 					}
@@ -2123,6 +2606,64 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 			v.Expand(i)
 			return true
 		}
+	}
+
+	// Status Modal Clicks
+	if showStatus {
+		r := geometry.NewRect(cardStartX, b.Min.Y+8, cardAreaWidth, h-16)
+
+		// Top Close button
+		closeRect := geometry.NewRect(r.Min.X+r.Width()-54, r.Min.Y+14, 40, 26)
+		if closeRect.Contains(pos) {
+			v.CloseStatus()
+			return true
+		}
+
+		// Top Refresh button
+		refRect := geometry.NewRect(r.Min.X+r.Width()-140, r.Min.Y+14, 76, 26)
+		if refRect.Contains(pos) {
+			v.RefreshStatus()
+			return true
+		}
+
+		// Banner Statuspage link
+		bannerY := r.Min.Y + 62
+		extLinkRect := geometry.NewRect(r.Min.X+r.Width()-40-135, bannerY+12, 122, 24)
+		if extLinkRect.Contains(pos) {
+			_ = window.OpenURL("https://status.atlassian.com")
+			return true
+		}
+
+		// Incident shortlink buttons
+		v.mu.Lock()
+		incidents := v.statusReport.ActiveIncidents
+		v.mu.Unlock()
+
+		incListY := bannerY + 48 + 16 + 18 + 2*(52+10) + 12 + 20
+		maxInc := 3
+		if len(incidents) < maxInc {
+			maxInc = len(incidents)
+		}
+		for idx := 0; idx < maxInc; idx++ {
+			inc := incidents[idx]
+			cardY := incListY + float32(idx)*(66+8)
+			incCardRect := geometry.NewRect(r.Min.X+20, cardY, r.Width()-40, 66)
+			linkRect := geometry.NewRect(incCardRect.Max.X-80, incCardRect.Min.Y+22, 70, 22)
+			if linkRect.Contains(pos) && inc.URL != "" {
+				_ = window.OpenURL(inc.URL)
+				return true
+			}
+		}
+
+		// Footer link button
+		footY := r.Min.Y + r.Height() - 36
+		footBtnRect := geometry.NewRect(r.Min.X+r.Width()-185, footY, 165, 24)
+		if footBtnRect.Contains(pos) {
+			_ = window.OpenURL("https://status.atlassian.com")
+			return true
+		}
+
+		return true
 	}
 
 	// Settings Modal Clicks
@@ -2341,7 +2882,7 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 			return true
 		}
 
-		// Field click focus
+		// Field click focus (Fields 1..5)
 		for i := 0; i < 5; i++ {
 			y := startY + float32(i*45)
 			inpRect := geometry.NewRect(r.Min.X+20, y+16, r.Width()-40, 24)
@@ -2360,6 +2901,86 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 				v.MarkNeedsLayout()
 				return true
 			}
+		}
+
+		syncSecY := row2Y + 34
+		syncRowY := syncSecY + 24
+
+		// Field 6: Jira Sync Interval focus
+		syncInpRect := geometry.NewRect(r.Min.X+260, syncRowY, 60, 24)
+		if syncInpRect.Contains(pos) {
+			v.mu.Lock()
+			v.activeField = 6
+			v.selectAll = false
+			tgt := v.getActiveTargetLocked()
+			if tgt != nil {
+				clickRelX := pos.X - (syncInpRect.Min.X + 4)
+				v.cursorPos = getCursorIndexFromX(*tgt, 11, clickRelX)
+			} else {
+				v.cursorPos = 0
+			}
+			v.mu.Unlock()
+			v.MarkNeedsLayout()
+			return true
+		}
+
+		// Field 7: Status Poll Interval focus
+		statInpRect := geometry.NewRect(r.Min.X+395, syncRowY, 60, 24)
+		if statInpRect.Contains(pos) {
+			v.mu.Lock()
+			v.activeField = 7
+			v.selectAll = false
+			tgt := v.getActiveTargetLocked()
+			if tgt != nil {
+				clickRelX := pos.X - (statInpRect.Min.X + 4)
+				v.cursorPos = getCursorIndexFromX(*tgt, 11, clickRelX)
+			} else {
+				v.cursorPos = 0
+			}
+			v.mu.Unlock()
+			v.MarkNeedsLayout()
+			return true
+		}
+
+		// Atlassian Status Check Toggle
+		statusToggleRect := geometry.NewRect(r.Min.X+20, syncRowY, 175, 24)
+		if statusToggleRect.Contains(pos) {
+			v.mu.Lock()
+			v.config.StatusCheckEnabled = !v.config.StatusCheckEnabled
+			v.mu.Unlock()
+			v.MarkNeedsLayout()
+			return true
+		}
+
+		// Presets [1m] [5m] [15m]
+		p1Rect := geometry.NewRect(r.Min.X+468, syncRowY, 36, 24)
+		if p1Rect.Contains(pos) {
+			v.mu.Lock()
+			v.intervalVal = "60"
+			v.statusIntervalVal = "60"
+			v.mu.Unlock()
+			v.MarkNeedsLayout()
+			return true
+		}
+
+		p5Rect := geometry.NewRect(r.Min.X+508, syncRowY, 36, 24)
+		if p5Rect.Contains(pos) {
+			v.mu.Lock()
+			v.intervalVal = "300"
+			v.statusIntervalVal = "300"
+			v.mu.Unlock()
+			v.MarkNeedsLayout()
+			return true
+		}
+
+		p15Rect := geometry.NewRect(r.Min.X+548, syncRowY, 38, 24)
+		if p15Rect.Contains(pos) {
+			v.mu.Lock()
+			v.intervalVal = "900"
+			v.statusIntervalVal = "900"
+			v.mu.Unlock()
+			v.MarkNeedsLayout()
+			return true
 		}
 
 		v.mu.Lock()
@@ -2730,7 +3351,7 @@ func (v *AppView) handleKey(ev *event.KeyEvent) bool {
 
 		// 8. Tab / Enter: Cycle next field
 		if ev.Key == event.KeyEnter || ev.Key == event.KeyTab {
-			v.activeField = (v.activeField % 5) + 1
+			v.activeField = (v.activeField % 7) + 1
 			v.selectAll = false
 			nextTgt := v.getActiveTargetLocked()
 			if nextTgt != nil {
@@ -2744,6 +3365,11 @@ func (v *AppView) handleKey(ev *event.KeyEvent) bool {
 
 		// 9. Standard Printable Characters
 		if ev.Rune >= 32 && !hasMod {
+			if v.activeField == 6 || v.activeField == 7 {
+				if ev.Rune < '0' || ev.Rune > '9' {
+					return true
+				}
+			}
 			rStr := string(ev.Rune)
 			if v.selectAll {
 				*target = rStr
@@ -2815,6 +3441,15 @@ func (v *AppView) saveSettings() {
 	v.mu.Lock()
 	v.saveCurrentInstanceFieldsLocked()
 
+	// Parse intervals
+	if pollInt, err := strconv.Atoi(strings.TrimSpace(v.intervalVal)); err == nil && pollInt > 0 {
+		v.config.PollInterval = pollInt
+	}
+	if statInt, err := strconv.Atoi(strings.TrimSpace(v.statusIntervalVal)); err == nil && statInt > 0 {
+		v.config.StatusPollInterval = statInt
+	}
+	v.config.ApplyDefaults()
+
 	// If credentials are configured on any instance, automatically switch to Live Jira mode
 	for _, inst := range v.config.Instances {
 		if inst.BaseURL != "" && inst.APIToken != "" {
@@ -2833,14 +3468,21 @@ func (v *AppView) saveSettings() {
 	}
 	cfg := v.config
 	v.showSettings = false
+	onReload := v.onConfigReload
 	v.invalidateFilterCacheLocked()
 	v.mu.Unlock()
 
 	_ = jira.SaveConfig(cfg)
 	v.client.UpdateConfig(cfg)
-	v.showToast("All instances saved")
+	if onReload != nil {
+		onReload()
+	}
+	v.showToast("Settings & polling updated")
 	v.SetState(window.StateFan)
 	v.RefreshIssues()
+	if cfg.StatusCheckEnabled {
+		v.RefreshStatus()
+	}
 }
 
 func (v *AppView) showToast(msg string) {

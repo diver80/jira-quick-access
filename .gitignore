@@ -38,3 +38,4 @@
 *.test
 *.out
 coverage.html
+.superpowers/

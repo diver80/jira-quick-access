@@ -89,14 +89,15 @@ func (c *Config) EnsureInstances() {
 
 // ApplyDefaults ensures required intervals and feature flags have sensible defaults.
 func (c *Config) ApplyDefaults() {
+	if c.PollInterval <= 0 && c.StatusPollInterval <= 0 {
+		c.StatusCheckEnabled = true
+	}
 	if c.PollInterval <= 0 {
 		c.PollInterval = 300
 	}
 	if c.StatusPollInterval <= 0 {
 		c.StatusPollInterval = 300
 	}
-	// StatusCheckEnabled is true by default
-	c.StatusCheckEnabled = true
 }
 
 // DefaultConfig returns reasonable default configuration with 5-minute polling.

@@ -1490,3 +1490,111 @@ func TestIsIssueForInstanceIsolation(t *testing.T) {
 	}
 }
 
+func TestStatusPanelToggle(t *testing.T) {
+	view, _ := createTestAppView()
+	defer view.Close()
+
+	if view.IsStatusOpen() {
+		t.Errorf("status panel should be closed initially")
+	}
+
+	// Toggle status panel open
+	view.ToggleStatus()
+	if !view.IsStatusOpen() {
+		t.Errorf("status panel should be open after toggle")
+	}
+	b := view.Bounds()
+	if b.Width() != 780 || b.Height() != 580 {
+		t.Errorf("expected bounds 780x580 when status panel is open, got %vx%v", b.Width(), b.Height())
+	}
+
+	// Toggle status panel closed
+	view.ToggleStatus()
+	if view.IsStatusOpen() {
+		t.Errorf("status panel should be closed after second toggle")
+	}
+}
+
+func TestStatusIndicatorClicks(t *testing.T) {
+	view, _ := createTestAppView()
+	defer view.Close()
+
+	// 1. In Rest state, clicking near top status beacon (Y=14) opens status panel
+	view.SetState(window.StateRest)
+	view.handleClick(geometry.Pt(18, 14))
+	if !view.IsStatusOpen() {
+		t.Errorf("expected status panel to open after clicking top beacon in StateRest")
+	}
+
+	// Close status panel
+	view.CloseStatus()
+	if view.IsStatusOpen() {
+		t.Errorf("expected status panel to be closed")
+	}
+
+	// 2. In Fan state, clicking top right status dot opens status panel
+	view.SetState(window.StateFan)
+	w := float32(200)
+	view.handleClick(geometry.Pt(w-18, 19))
+	if !view.IsStatusOpen() {
+		t.Errorf("expected status panel to open after clicking top right dot in StateFan")
+	}
+
+	// Close status panel
+	view.CloseStatus()
+
+	// 3. In Expanded state, clicking top shelf status button opens status panel
+	view.SetState(window.StateExpanded)
+	tabBarWidth := float32(110)
+	tabStartX := float32(780) - tabBarWidth
+	view.handleClick(geometry.Pt(tabStartX+12, 18))
+	if !view.IsStatusOpen() {
+		t.Errorf("expected status panel to open after clicking shelf status button in StateExpanded")
+	}
+}
+
+func TestSettingsSyncAndStatusConfiguration(t *testing.T) {
+	view, _ := createTestAppView()
+	defer view.Close()
+
+	reloadInvoked := false
+	view.SetOnConfigReload(func() {
+		reloadInvoked = true
+	})
+
+	view.OpenSettings()
+	if !view.showSettings {
+		t.Fatalf("expected settings to be open")
+	}
+
+	// Simulate typing new poll interval into field 6
+	view.mu.Lock()
+	view.intervalVal = "120"
+	view.statusIntervalVal = "240"
+	view.config.StatusCheckEnabled = false
+	view.mu.Unlock()
+
+	// Save settings
+	view.saveSettings()
+
+	view.mu.Lock()
+	savedPoll := view.config.PollInterval
+	savedStatusPoll := view.config.StatusPollInterval
+	savedStatusEnabled := view.config.StatusCheckEnabled
+	view.mu.Unlock()
+
+	if savedPoll != 120 {
+		t.Errorf("expected PollInterval 120, got %d", savedPoll)
+	}
+	if savedStatusPoll != 240 {
+		t.Errorf("expected StatusPollInterval 240, got %d", savedStatusPoll)
+	}
+	if savedStatusEnabled != false {
+		t.Errorf("expected StatusCheckEnabled false, got %v", savedStatusEnabled)
+	}
+	if !reloadInvoked {
+		t.Errorf("expected onConfigReload to be invoked on save")
+	}
+}
+
+

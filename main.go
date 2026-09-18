@@ -63,12 +63,23 @@ func main() {
 	})
 	defer rootView.Close()
 
-	// Initial issue fetch
+	reloadCh := make(chan struct{}, 1)
+	rootView.SetOnConfigReload(func() {
+		select {
+		case reloadCh <- struct{}{}:
+		default:
+		}
+	})
+
+	// Initial issue & status fetch
 	rootView.RefreshIssues()
+	if cfg.StatusCheckEnabled {
+		rootView.RefreshStatus()
+	}
 
 	uiApp.SetRoot(rootView)
 
-	// 7. Background poller & edge dock positioning
+	// 7. Dynamic background poller & edge dock positioning
 	go func() {
 		for _, delay := range []time.Duration{60 * time.Millisecond, 200 * time.Millisecond, 500 * time.Millisecond} {
 			time.Sleep(delay)
@@ -81,15 +92,47 @@ func main() {
 
 		pollInterval := cfg.PollInterval
 		if pollInterval <= 0 {
-			pollInterval = 60
+			pollInterval = 300
+		}
+		statInterval := cfg.StatusPollInterval
+		if statInterval <= 0 {
+			statInterval = 300
 		}
 
-		ticker := time.NewTicker(time.Duration(pollInterval) * time.Second)
-		defer ticker.Stop()
+		issueTicker := time.NewTicker(time.Duration(pollInterval) * time.Second)
+		defer issueTicker.Stop()
 
-		for range ticker.C {
-			rootView.RefreshIssues()
-			gogpuApp.RequestRedraw()
+		statusTicker := time.NewTicker(time.Duration(statInterval) * time.Second)
+		defer statusTicker.Stop()
+
+		for {
+			select {
+			case <-issueTicker.C:
+				rootView.RefreshIssues()
+				gogpuApp.RequestRedraw()
+			case <-statusTicker.C:
+				latestCfg := jira.LoadConfig()
+				if latestCfg.StatusCheckEnabled {
+					rootView.RefreshStatus()
+					gogpuApp.RequestRedraw()
+				}
+			case <-reloadCh:
+				latestCfg := jira.LoadConfig()
+				newPoll := latestCfg.PollInterval
+				if newPoll <= 0 {
+					newPoll = 300
+				}
+				newStat := latestCfg.StatusPollInterval
+				if newStat <= 0 {
+					newStat = 300
+				}
+				issueTicker.Reset(time.Duration(newPoll) * time.Second)
+				statusTicker.Reset(time.Duration(newStat) * time.Second)
+				if latestCfg.StatusCheckEnabled {
+					rootView.RefreshStatus()
+				}
+				gogpuApp.RequestRedraw()
+			}
 		}
 	}()
 
