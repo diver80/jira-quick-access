@@ -33,8 +33,10 @@ type Config struct {
 	Email        string           `json:"email"`         // Backward-compatibility primary
 	APIToken     string           `json:"api_token"`     // Backward-compatibility primary
 	JQLQuery     string           `json:"jql_query"`     // Backward-compatibility primary
-	PollInterval int              `json:"poll_interval"` // Sync frequency in seconds (default: 300 / 5 min)
-	BranchPrefix string           `json:"branch_prefix"` // Git branch prefix (e.g., "feature/")
+	PollInterval       int              `json:"poll_interval"`         // Sync frequency in seconds (default: 300 / 5 min)
+	StatusCheckEnabled bool             `json:"status_check_enabled"` // Atlassian status checking (default: true)
+	StatusPollInterval int              `json:"status_poll_interval"` // Status check frequency in seconds (default: 300)
+	BranchPrefix       string           `json:"branch_prefix"`         // Git branch prefix (e.g., "feature/")
 	PinnedKeys   []string         `json:"pinned_keys"`   // Pinned issue keys
 	DemoMode     bool             `json:"demo_mode"`     // Mock / demo workflow without live Jira (default: false)
 	DebugMode    bool             `json:"debug_mode"`    // Verbose logging of API requests & auth headers
@@ -85,6 +87,18 @@ func (c *Config) EnsureInstances() {
 	}
 }
 
+// ApplyDefaults ensures required intervals and feature flags have sensible defaults.
+func (c *Config) ApplyDefaults() {
+	if c.PollInterval <= 0 {
+		c.PollInterval = 300
+	}
+	if c.StatusPollInterval <= 0 {
+		c.StatusPollInterval = 300
+	}
+	// StatusCheckEnabled is true by default
+	c.StatusCheckEnabled = true
+}
+
 // DefaultConfig returns reasonable default configuration with 5-minute polling.
 func DefaultConfig() Config {
 	return Config{
@@ -108,21 +122,23 @@ func DefaultConfig() Config {
 				Color:    "#a855f7",
 			},
 		},
-		ActiveInstID: "inst-1",
-		BaseURL:      "https://avono.atlassian.net",
-		Email:        "frank.hess@avono.de",
-		APIToken:     "",
-		JQLQuery:     "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC",
-		PollInterval: 300, // 5 minutes (300 seconds)
-		BranchPrefix: "feature/",
-		PinnedKeys:   []string{},
-		DemoMode:     false,
-		DebugMode:    true,
-		DockSide:     0,
-		MonitorIndex: 0,
-		PosYRatio:    0.5,
-		AlwaysOnTop:  true,
-		AutoHide:     false,
+		ActiveInstID:       "inst-1",
+		BaseURL:            "https://avono.atlassian.net",
+		Email:              "frank.hess@avono.de",
+		APIToken:           "",
+		JQLQuery:           "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC",
+		PollInterval:       300, // 5 minutes (300 seconds)
+		StatusCheckEnabled: true,
+		StatusPollInterval: 300,
+		BranchPrefix:       "feature/",
+		PinnedKeys:         []string{},
+		DemoMode:           false,
+		DebugMode:          true,
+		DockSide:           0,
+		MonitorIndex:       0,
+		PosYRatio:          0.5,
+		AlwaysOnTop:        true,
+		AutoHide:           false,
 	}
 }
 

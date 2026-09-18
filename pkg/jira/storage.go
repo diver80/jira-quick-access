@@ -156,6 +156,16 @@ func LoadConfig() Config {
 			if saved.PollInterval > 0 {
 				cfg.PollInterval = saved.PollInterval
 			}
+			if bytes.Contains(data, []byte("\"status_check_enabled\"")) {
+				cfg.StatusCheckEnabled = saved.StatusCheckEnabled
+			} else {
+				cfg.StatusCheckEnabled = true
+			}
+			if saved.StatusPollInterval > 0 {
+				cfg.StatusPollInterval = saved.StatusPollInterval
+			} else {
+				cfg.StatusPollInterval = 300
+			}
 			if saved.BranchPrefix != "" {
 				cfg.BranchPrefix = saved.BranchPrefix
 			}

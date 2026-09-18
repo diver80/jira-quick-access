@@ -248,6 +248,26 @@ func TestConfigEnsureInstances(t *testing.T) {
 	if def.ActiveInstID != "inst-1" {
 		t.Errorf("expected default ActiveInstID 'inst-1', got %q", def.ActiveInstID)
 	}
+	if !def.StatusCheckEnabled {
+		t.Errorf("expected default StatusCheckEnabled true, got %v", def.StatusCheckEnabled)
+	}
+	if def.StatusPollInterval != 300 {
+		t.Errorf("expected default StatusPollInterval 300, got %d", def.StatusPollInterval)
+	}
+}
+
+func TestConfigStatusAndPollIntervalDefaults(t *testing.T) {
+	cfg := Config{}
+	cfg.ApplyDefaults()
+	if cfg.PollInterval != 300 {
+		t.Errorf("expected PollInterval 300, got %d", cfg.PollInterval)
+	}
+	if !cfg.StatusCheckEnabled {
+		t.Errorf("expected StatusCheckEnabled true by default")
+	}
+	if cfg.StatusPollInterval != 300 {
+		t.Errorf("expected StatusPollInterval 300, got %d", cfg.StatusPollInterval)
+	}
 }
 
 // Tier 1: Unit Tests for Config.MaskedAPIToken and InstanceConfig.MaskedAPIToken
