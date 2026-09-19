@@ -4,7 +4,7 @@ Jira tickets that live at the edge of your screen. A high-performance native des
 
 No dock clutter, no window to manage. Slide the pointer to the right edge and the deck fans out.
 
-📥 **[Release history & downloads (Confluence)](https://avono.atlassian.net/wiki/spaces/~557058ea22d0f92e8646e397b6334abc9884fd/pages/2098888731/App+Jira+Quick+Access)** · 📖 **[Fachlicher & Technischer Hintergrund (Deutsch)](docs/HINTERGRUND.md)**
+📥 **[Release history & downloads (Confluence)](https://avono.atlassian.net/wiki/spaces/~557058ea22d0f92e8646e397b6334abc9884fd/pages/2098888731/App+Jira+Quick+Access)**
 
 Current source version: **1.0.6**. Build outputs are generated locally under `dist/` and are not committed to Git. See Confluence for binary publication status.
 
