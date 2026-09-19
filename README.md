@@ -4,7 +4,9 @@ Jira tickets that live at the edge of your screen. A high-performance native des
 
 No dock clutter, no window to manage. Slide the pointer to the right edge and the deck fans out.
 
-📥 **[Download for macOS (.dmg Installer)](dist/osx/Jira%20Quick%20Access-v1.0.5-macOS-Universal.dmg)** · **[macOS App Bundle & Assets](dist/osx/)** · 📖 **[Fachlicher & Technischer Hintergrund (Deutsch)](docs/HINTERGRUND.md)**
+📥 **[Release history & downloads (Confluence)](https://avono.atlassian.net/wiki/spaces/~557058ea22d0f92e8646e397b6334abc9884fd/pages/2098888731/App+Jira+Quick+Access)** · 📖 **[Fachlicher & Technischer Hintergrund (Deutsch)](docs/HINTERGRUND.md)**
+
+Current source version: **1.0.6**. Build outputs are generated locally under `dist/` and are not committed to Git. See Confluence for binary publication status.
 
 > [!NOTE]
 > **Platform Support**: Currently, **only the macOS (Darwin) version is actively tested and verified** (with native Cocoa edge docking, Retina multi-resolution icons, and embedded WebKit). Windows and Linux builds are experimental cross-compilations and not yet thoroughly tested.
@@ -27,7 +29,9 @@ No dock clutter, no window to manage. Slide the pointer to the right edge and th
 
 ![Jira Instances & Credentials Settings Overlay](docs/screenshots/settings.png)
 
-Manage credentials, multi-instance tabs (e.g. *avono cloud*, *avono DC*), custom JQL queries, connection test verification, and `.env` import.
+Settings are split into **Jira instances** (credentials, JQL, accent color, connection testing, `.env` import, and instance management) and **Application** (window/display controls, refresh intervals, health monitoring, Live/Demo mode, and debug logging). **Save all settings** applies across both sections; window controls apply immediately.
+
+> The screenshot above shows the earlier settings layout. Version **1.0.6** introduces the separated tabs described here.
 
 ### 💾 Where Settings & Credentials Are Stored
 
@@ -38,7 +42,7 @@ All instance settings, JQL queries, and credentials are saved locally on your de
 | **macOS & Linux** | `~/.jira-quick-access/config.json` |
 | **Windows** | `%USERPROFILE%\.jira-quick-access\config.json` |
 
-You can also drop a `.env` file (see `.env.example`) directly in the app's working directory and click **Load .env** in the Settings overlay for instant credential provisioning.
+You can also drop a `.env` file (see `.env.example`) directly in the app's working directory and click **Import .env** in **Jira instances** to populate the selected instance's credentials.
 
 ---
 
@@ -88,7 +92,7 @@ Standard macOS clipboard shortcuts dispatch natively throughout embedded WebView
 
 ## 🛠️ Multi-Platform Build & Run
 
-Requires **Go 1.21+**. Zero external C libraries required on Windows and Linux; uses native Cocoa/WebKit on macOS.
+Requires **Go 1.27+** (matching `go.mod`). Zero external C libraries required on Windows and Linux; uses native Cocoa/WebKit on macOS.
 
 ### Quick Start:
 ```bash
@@ -114,14 +118,15 @@ The bundled `build.sh` script automates cross-compilation, icon packaging, and d
 ```
 
 Generated artifacts are placed in `dist/`:
-- `dist/osx/Jira Quick Access.app` (macOS Universal 2 App Bundle with Retina `AppIcon.icns`)
-- `dist/osx/Jira Quick Access-v1.0.5-macOS-Universal.dmg` (Drag-and-Drop Disk Image Installer)
-- `dist/win/jira-quick-access-windows-amd64.exe`
-- `dist/lin/jira-quick-access-linux-amd64`
+- `dist/osx.noindex/Jira Quick Access.app` (macOS Universal 2 App Bundle with Retina `AppIcon.icns`)
+- `dist/osx/Jira Quick Access-v1.0.6-macOS-Universal.dmg` (Drag-and-Drop Disk Image Installer)
+- `dist/osx/JiraQuickAccess-v1.0.6-macOS-Universal.tar.gz`
+- `dist/win/jira-quick-access-v1.0.6-windows-{amd64,arm64}.zip`
+- `dist/lin/jira-quick-access-v1.0.6-linux-{amd64,arm64}.tar.gz`
 
 ### 🍎 How to Install & Launch on macOS:
 1. **Automated (Fastest)**: Run `./build.sh install`. This copies the app into `/Applications/`, clears quarantine flags, and makes it available system-wide in Spotlight and Launchpad.
-2. **Standard macOS DMG**: Open the [Jira Quick Access DMG Installer](dist/osx/Jira%20Quick%20Access-v1.0.5-macOS-Universal.dmg) in Finder and drag the **Jira Quick Access** icon onto the **Applications** folder shortcut.
+2. **Standard macOS DMG**: After building, open `dist/osx/Jira Quick Access-v1.0.6-macOS-Universal.dmg` in Finder and drag the **Jira Quick Access** icon onto the **Applications** folder shortcut.
 3. **Launch**: Press `⌘ + Space`, type `Jira Quick Access`, and hit `Enter`.
 4. **Launch at Login (Optional)**: Open **macOS System Settings** -> **General** -> **Login Items** -> Click `+` and select `Jira Quick Access` from `/Applications`.
 

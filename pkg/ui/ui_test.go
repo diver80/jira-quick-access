@@ -44,11 +44,11 @@ type testMockCanvas struct {
 	drawTexts []testDrawTextCall
 }
 
-func (m *testMockCanvas) Clear(color widget.Color)                                               {}
-func (m *testMockCanvas) DrawRect(r geometry.Rect, color widget.Color)                           {}
-func (m *testMockCanvas) FillRectDirect(r geometry.Rect, color widget.Color)                     {}
-func (m *testMockCanvas) StrokeRect(r geometry.Rect, color widget.Color, strokeWidth float32)    {}
-func (m *testMockCanvas) DrawRoundRect(r geometry.Rect, color widget.Color, radius float32)     {}
+func (m *testMockCanvas) Clear(color widget.Color)                                            {}
+func (m *testMockCanvas) DrawRect(r geometry.Rect, color widget.Color)                        {}
+func (m *testMockCanvas) FillRectDirect(r geometry.Rect, color widget.Color)                  {}
+func (m *testMockCanvas) StrokeRect(r geometry.Rect, color widget.Color, strokeWidth float32) {}
+func (m *testMockCanvas) DrawRoundRect(r geometry.Rect, color widget.Color, radius float32)   {}
 func (m *testMockCanvas) StrokeRoundRect(r geometry.Rect, color widget.Color, radius float32, strokeWidth float32) {
 }
 func (m *testMockCanvas) DrawCircle(center geometry.Point, radius float32, color widget.Color) {}
@@ -79,16 +79,16 @@ func (m *testMockCanvas) getDrawTexts() []testDrawTextCall {
 func (m *testMockCanvas) MeasureText(text string, fontSize float32, bold bool) float32 {
 	return float32(len(text)) * fontSize * 0.6
 }
-func (m *testMockCanvas) DrawImage(img image.Image, at geometry.Point)   {}
-func (m *testMockCanvas) PushClip(r geometry.Rect)                       {}
+func (m *testMockCanvas) DrawImage(img image.Image, at geometry.Point)      {}
+func (m *testMockCanvas) PushClip(r geometry.Rect)                          {}
 func (m *testMockCanvas) PushClipRoundRect(r geometry.Rect, radius float32) {}
-func (m *testMockCanvas) PopClip()                                       {}
-func (m *testMockCanvas) PushTransform(offset geometry.Point)            {}
-func (m *testMockCanvas) PopTransform()                                  {}
-func (m *testMockCanvas) TransformOffset() geometry.Point                { return geometry.Pt(0, 0) }
-func (m *testMockCanvas) ScreenOriginBase() geometry.Point               { return geometry.Pt(0, 0) }
-func (m *testMockCanvas) ClipBounds() geometry.Rect                      { return geometry.NewRect(0, 0, 1000, 1000) }
-func (m *testMockCanvas) ReplayScene(s widget.SceneCache)                {}
+func (m *testMockCanvas) PopClip()                                          {}
+func (m *testMockCanvas) PushTransform(offset geometry.Point)               {}
+func (m *testMockCanvas) PopTransform()                                     {}
+func (m *testMockCanvas) TransformOffset() geometry.Point                   { return geometry.Pt(0, 0) }
+func (m *testMockCanvas) ScreenOriginBase() geometry.Point                  { return geometry.Pt(0, 0) }
+func (m *testMockCanvas) ClipBounds() geometry.Rect                         { return geometry.NewRect(0, 0, 1000, 1000) }
+func (m *testMockCanvas) ReplayScene(s widget.SceneCache)                   {}
 
 type testMockContext struct{}
 type testContext = testMockContext
@@ -227,44 +227,44 @@ func TestAppViewFilterMemoizationAndInvalidation(t *testing.T) {
 	view.mu.Lock()
 	view.issues = []jira.Issue{
 		{
-			Key:          "AVN-101",
-			Summary:      "Implement OAuth 2.0 PKCE Flow",
-			InstanceID:   "inst-1",
-			Status:       jira.Status{Name: "To Do", CategoryKey: "new"},
-			Priority:     jira.Priority{Name: "High"},
-			IssueType:    jira.IssueType{Name: "Story"},
-			Updated:      now,
-			Pinned:       true,
+			Key:        "AVN-101",
+			Summary:    "Implement OAuth 2.0 PKCE Flow",
+			InstanceID: "inst-1",
+			Status:     jira.Status{Name: "To Do", CategoryKey: "new"},
+			Priority:   jira.Priority{Name: "High"},
+			IssueType:  jira.IssueType{Name: "Story"},
+			Updated:    now,
+			Pinned:     true,
 		},
 		{
-			Key:          "AVN-102",
-			Summary:      "Fix WebKit Memory Leak on macOS Darwin",
-			InstanceID:   "inst-1",
-			Status:       jira.Status{Name: "In Progress", CategoryKey: "indeterminate"},
-			Priority:     jira.Priority{Name: "Highest"},
-			IssueType:    jira.IssueType{Name: "Bug"},
-			Updated:      now.Add(-1 * time.Hour),
-			Pinned:       false,
+			Key:        "AVN-102",
+			Summary:    "Fix WebKit Memory Leak on macOS Darwin",
+			InstanceID: "inst-1",
+			Status:     jira.Status{Name: "In Progress", CategoryKey: "indeterminate"},
+			Priority:   jira.Priority{Name: "Highest"},
+			IssueType:  jira.IssueType{Name: "Bug"},
+			Updated:    now.Add(-1 * time.Hour),
+			Pinned:     false,
 		},
 		{
-			Key:          "AVN-201",
-			Summary:      "Migrate Database to PostgreSQL",
-			InstanceID:   "inst-2",
-			Status:       jira.Status{Name: "In Review", CategoryKey: "indeterminate"},
-			Priority:     jira.Priority{Name: "Medium"},
-			IssueType:    jira.IssueType{Name: "Task"},
-			Updated:      now.Add(-2 * time.Hour),
-			Pinned:       false,
+			Key:        "AVN-201",
+			Summary:    "Migrate Database to PostgreSQL",
+			InstanceID: "inst-2",
+			Status:     jira.Status{Name: "In Review", CategoryKey: "indeterminate"},
+			Priority:   jira.Priority{Name: "Medium"},
+			IssueType:  jira.IssueType{Name: "Task"},
+			Updated:    now.Add(-2 * time.Hour),
+			Pinned:     false,
 		},
 		{
-			Key:          "AVN-202",
-			Summary:      "Data Center Rest v2 API Endpoints",
-			InstanceID:   "inst-2",
-			Status:       jira.Status{Name: "Done", CategoryKey: "done"},
-			Priority:     jira.Priority{Name: "Low"},
-			IssueType:    jira.IssueType{Name: "Story"},
-			Updated:      now.Add(-3 * time.Hour),
-			Pinned:       true,
+			Key:        "AVN-202",
+			Summary:    "Data Center Rest v2 API Endpoints",
+			InstanceID: "inst-2",
+			Status:     jira.Status{Name: "Done", CategoryKey: "done"},
+			Priority:   jira.Priority{Name: "Low"},
+			IssueType:  jira.IssueType{Name: "Story"},
+			Updated:    now.Add(-3 * time.Hour),
+			Pinned:     true,
 		},
 	}
 	view.activeInstIdx = 0 // "inst-1" (avono)
@@ -795,11 +795,12 @@ func TestAppViewClickAndHoverDetails(t *testing.T) {
 	ctx := &testMockContext{}
 	canvas := &testMockCanvas{}
 
-	view.mu.Lock()
-	view.issues = []jira.Issue{
+	clickIssues := []jira.Issue{
 		{Key: "CLK-1", Summary: "Click test 1", InstanceID: "inst-1", Status: jira.Status{Name: "To Do", CategoryKey: "new"}, URL: "https://avono.atlassian.net/browse/CLK-1"},
 		{Key: "CLK-2", Summary: "Click test 2", InstanceID: "inst-2", Status: jira.Status{Name: "Done", CategoryKey: "done"}, URL: "https://avono.atlassian.net/browse/CLK-2"},
 	}
+	view.mu.Lock()
+	view.issues = clickIssues
 	view.mu.Unlock()
 
 	// 1. Hover in Rest State
@@ -830,8 +831,9 @@ func TestAppViewClickAndHoverDetails(t *testing.T) {
 	view.SetBounds(geometry.NewRect(0, 0, 780, 580))
 	view.Draw(ctx, canvas)
 
-	// Click instance tab 2 ("avono DC") at x=160, y=60
-	view.handleClick(geometry.Pt(160, 60))
+	// Click the second visible instance tab.
+	layout := settingsTestLayout(view)
+	view.handleClick(settingsTestCenter(layout.instanceTabs[1].rect))
 	view.mu.Lock()
 	selectedInst := view.selectedInstIdx
 	view.mu.Unlock()
@@ -839,23 +841,29 @@ func TestAppViewClickAndHoverDetails(t *testing.T) {
 		t.Errorf("expected selectedInstIdx=1 after clicking tab 2, got %d", selectedInst)
 	}
 
-	// Click on input field 1 (Name field at y=125)
-	view.handleClick(geometry.Pt(100, 125))
+	// Focus the selected instance's name field.
+	view.handleClick(settingsTestCenter(layout.fields[0]))
 	view.mu.Lock()
 	if view.activeField != 1 {
 		t.Errorf("expected activeField=1, got %d", view.activeField)
 	}
 	view.mu.Unlock()
 
-	// Click Test Connection Button (x=300, y=535)
-	view.handleClick(geometry.Pt(300, 535))
-
-	// Click Save Button in settings modal (x=580, y=535)
-	view.handleClick(geometry.Pt(580, 535))
+	// Instance action and the shared save footer.
+	view.handleClick(settingsTestCenter(layout.testConnection))
+	view.handleClick(settingsTestCenter(layout.save))
 	view.mu.Lock()
 	if view.showSettings {
 		t.Errorf("expected showSettings=false after clicking save button")
 	}
+	view.mu.Unlock()
+
+	// Saving launches an asynchronous refresh. Stop and join background work
+	// before restoring the click fixture, rather than racing demo/live results.
+	view.Close()
+	view.mu.Lock()
+	view.issues = clickIssues
+	view.invalidateFilterCacheLocked()
 	view.mu.Unlock()
 
 	// 3. Fan State Clicks & Hover
@@ -969,45 +977,36 @@ func TestAppViewDockingAndProfileColorControls(t *testing.T) {
 	view.SetBounds(geometry.NewRect(0, 0, 780, 580))
 	view.Draw(ctx, canvas)
 
-	getRMinX := func() float32 {
-		if view.dockSide == window.DockSideLeft {
-			return 118
-		}
-		return 8
-	}
-
-	// Click Left Edge button in Settings
-	dockSecY := float32(78 + 12 + 5*45 + 2 + 40)
-	row1Y := dockSecY + 24
-	view.handleClick(geometry.Pt(getRMinX()+40, row1Y+10))
+	// Window controls are scoped to Application settings.
+	view.handleClick(settingsTestCenter(settingsTestLayout(view).applicationTab))
+	view.handleClick(settingsTestCenter(settingsTestLayout(view).leftEdge))
 	if view.dockSide != window.DockSideLeft {
 		t.Errorf("expected Left Edge click to set DockSideLeft, got %v", view.dockSide)
 	}
 
 	// Click Right Edge button in Settings
-	view.handleClick(geometry.Pt(getRMinX()+140, row1Y+10))
+	view.handleClick(settingsTestCenter(settingsTestLayout(view).rightEdge))
 	if view.dockSide != window.DockSideRight {
 		t.Errorf("expected Right Edge click to set DockSideRight, got %v", view.dockSide)
 	}
 
-	// Click Always On Top toggle
-	row2Y := dockSecY + 54
+	// Click Always On Top toggle.
 	prevAOT := view.alwaysOnTop
-	view.handleClick(geometry.Pt(getRMinX()+40, row2Y+10))
+	view.handleClick(settingsTestCenter(settingsTestLayout(view).alwaysOnTop))
 	if view.alwaysOnTop == prevAOT {
 		t.Errorf("expected Always On Top toggle click to flip state")
 	}
 
 	// Click Auto-Hide toggle
 	prevAH := view.autoHide
-	view.handleClick(geometry.Pt(getRMinX()+180, row2Y+10))
+	view.handleClick(settingsTestCenter(settingsTestLayout(view).autoHide))
 	if view.autoHide == prevAH {
 		t.Errorf("expected Auto-Hide toggle click to flip state")
 	}
 
-	// Click 2nd Profile Color chip (Purple: #a855f7 at rMinX+30+28=58, y=colorRowY+24)
-	colorRowY := float32(78 + 12 + 5*45 + 2)
-	view.handleClick(geometry.Pt(getRMinX()+30+28, colorRowY+24))
+	// Accent color belongs to the selected Jira instance.
+	view.handleClick(settingsTestCenter(settingsTestLayout(view).instancesTab))
+	view.handleClick(settingsTestLayout(view).colorCenters[1])
 	view.mu.Lock()
 	col := view.colorVal
 	view.mu.Unlock()
@@ -1269,7 +1268,7 @@ type mockManager struct {
 	tooltip string
 }
 
-func (m *mockManager) InitEdgeRail(width, height int) error                  { return nil }
+func (m *mockManager) InitEdgeRail(width, height int) error                 { return nil }
 func (m *mockManager) SetState(state window.WindowState, width, height int) {}
 func (m *mockManager) Dock(width, height int)                               {}
 func (m *mockManager) DockToRightEdge(width, height int)                    {}

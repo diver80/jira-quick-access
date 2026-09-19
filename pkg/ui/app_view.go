@@ -63,8 +63,9 @@ type AppView struct {
 	isTucked        bool
 
 	// Multi-instance filtering & settings tracking
-	activeInstIdx   int // Currently viewed instance filter in Fan & Expanded states (0..n-1)
-	selectedInstIdx int // Currently edited instance in Settings overlay
+	activeInstIdx   int             // Currently viewed instance filter in Fan & Expanded states (0..n-1)
+	selectedInstIdx int             // Currently edited instance in Settings overlay
+	settingsSection settingsSection // Current settings page: instances or application
 
 	// Active instance field buffers (5 fields + color)
 	nameVal     string
@@ -83,11 +84,11 @@ type AppView struct {
 	statusMsg   string
 
 	// Status monitoring
-	showStatus        bool
-	statusClient      *status.Client
-	statusReport      status.StatusReport
-	hoveredStatus     bool
-	statusIntervalVal string
+	showStatus         bool
+	statusClient       *status.Client
+	statusReport       status.StatusReport
+	hoveredStatus      bool
+	statusIntervalVal  string
 	statusOpenedFrom   window.WindowState
 	settingsOpenedFrom window.WindowState
 	version            string
@@ -123,6 +124,7 @@ type appViewStateSnapshot struct {
 	selectedInstIdx   int
 	hoveredTabIdx     int
 	hoveredSettings   bool
+	settingsSection   settingsSection
 	instances         []jira.InstanceConfig
 	nameVal           string
 	urlVal            string
@@ -147,6 +149,7 @@ func NewAppView(
 	client *jira.Client,
 	onRedraw func(),
 ) *AppView {
+	cfg = cfg.Clone()
 	cfg.ApplyDefaults()
 	cfg.EnsureInstances()
 	if cfg.Instances[0].APIToken == "" || cfg.Instances[0].Email == "" {
@@ -156,32 +159,32 @@ func NewAppView(
 	ctx, cancel := context.WithCancel(context.Background())
 
 	v := &AppView{
-		config:          cfg,
-		client:          client,
-		activeIdx:       0,
-		activeTheme:     ThemeMint,
-		state:           window.StateRest,
-		showSettings:    false,
-		hoveredTabIdx:   -1,
-		hoveredSettings: false,
-		dockSide:        window.DockSide(cfg.DockSide),
-		selectedMonitor: cfg.MonitorIndex,
-		alwaysOnTop:     cfg.AlwaysOnTop,
-		autoHide:        cfg.AutoHide,
-		activeInstIdx:   0,
-		selectedInstIdx: 0,
-		demoMode:        cfg.DemoMode,
-		debugMode:       cfg.DebugMode,
-		intervalVal:       fmt.Sprintf("%d", cfg.PollInterval),
-		statusIntervalVal: fmt.Sprintf("%d", cfg.StatusPollInterval),
+		config:             cfg,
+		client:             client,
+		activeIdx:          0,
+		activeTheme:        ThemeMint,
+		state:              window.StateRest,
+		showSettings:       false,
+		hoveredTabIdx:      -1,
+		hoveredSettings:    false,
+		dockSide:           window.DockSide(cfg.DockSide),
+		selectedMonitor:    cfg.MonitorIndex,
+		alwaysOnTop:        cfg.AlwaysOnTop,
+		autoHide:           cfg.AutoHide,
+		activeInstIdx:      0,
+		selectedInstIdx:    0,
+		demoMode:           cfg.DemoMode,
+		debugMode:          cfg.DebugMode,
+		intervalVal:        fmt.Sprintf("%d", cfg.PollInterval),
+		statusIntervalVal:  fmt.Sprintf("%d", cfg.StatusPollInterval),
 		statusOpenedFrom:   window.StateFan,
 		settingsOpenedFrom: window.StateFan,
-		statusClient:      status.NewClient(),
-		statusReport:    status.StatusReport{OverallIndicator: status.IndicatorNone, OverallText: "All Systems Operational"},
-		onRedraw:        onRedraw,
-		ctx:             ctx,
-		cancel:          cancel,
-		cacheDirty:      true,
+		statusClient:       status.NewClient(),
+		statusReport:       status.StatusReport{OverallIndicator: status.IndicatorNone, OverallText: "All Systems Operational"},
+		onRedraw:           onRedraw,
+		ctx:                ctx,
+		cancel:             cancel,
+		cacheDirty:         true,
 	}
 
 	if window.DefaultManager != nil {
@@ -230,7 +233,7 @@ func NewAppView(
 		v.config.DockSide = int(side)
 		v.config.MonitorIndex = monIdx
 		v.config.PosYRatio = yRatio
-		cfgToSave := v.config
+		cfgToSave := v.config.Clone()
 		v.mu.Unlock()
 
 		_ = jira.SaveConfig(cfgToSave)
@@ -374,7 +377,7 @@ func (v *AppView) SetDockSide(side window.DockSide) {
 	v.mu.Lock()
 	v.dockSide = side
 	v.config.DockSide = int(side)
-	cfg := v.config
+	cfg := v.config.Clone()
 	v.mu.Unlock()
 
 	_ = jira.SaveConfig(cfg)
@@ -392,7 +395,7 @@ func (v *AppView) SetMonitor(monIdx int) {
 	v.mu.Lock()
 	v.selectedMonitor = monIdx
 	v.config.MonitorIndex = monIdx
-	cfg := v.config
+	cfg := v.config.Clone()
 	v.mu.Unlock()
 
 	_ = jira.SaveConfig(cfg)
@@ -417,7 +420,7 @@ func (v *AppView) SetAlwaysOnTop(alwaysOnTop bool) {
 	v.mu.Lock()
 	v.alwaysOnTop = alwaysOnTop
 	v.config.AlwaysOnTop = alwaysOnTop
-	cfg := v.config
+	cfg := v.config.Clone()
 	v.mu.Unlock()
 
 	window.SetAlwaysOnTop(alwaysOnTop)
@@ -433,7 +436,7 @@ func (v *AppView) SetAutoHide(autoHide bool) {
 	v.mu.Lock()
 	v.autoHide = autoHide
 	v.config.AutoHide = autoHide
-	cfg := v.config
+	cfg := v.config.Clone()
 	v.mu.Unlock()
 
 	window.SetAutoHide(autoHide)
@@ -526,40 +529,36 @@ func isIssueForInstance(iss jira.Issue, inst jira.InstanceConfig, instIdx int) b
 }
 
 func (v *AppView) getFilteredIssuesLocked() []jira.Issue {
-	if !v.cacheDirty && v.filteredCache != nil {
+	// A nil result is a valid cached empty search, not a cache miss.
+	if !v.cacheDirty {
 		return v.filteredCache
 	}
 
-	var base []jira.Issue
-	if v.activeInstIdx >= 0 && v.activeInstIdx < len(v.config.Instances) {
-		targetInst := v.config.Instances[v.activeInstIdx]
+	filterInstance := v.activeInstIdx >= 0 && v.activeInstIdx < len(v.config.Instances)
+	var targetInst jira.InstanceConfig
+	if filterInstance {
+		targetInst = v.config.Instances[v.activeInstIdx]
+	}
+	q := strings.ToLower(v.searchQuery)
+	if !filterInstance && q == "" {
+		v.filteredCache = v.issues
+	} else {
+		// Apply both predicates in one pass instead of copying an intermediate list.
+		var result []jira.Issue
 		for _, iss := range v.issues {
-			if isIssueForInstance(iss, targetInst, v.activeInstIdx) {
-				base = append(base, iss)
+			if filterInstance && !isIssueForInstance(iss, targetInst, v.activeInstIdx) {
+				continue
+			}
+			if q == "" || strings.Contains(strings.ToLower(iss.Key), q) ||
+				strings.Contains(strings.ToLower(iss.Summary), q) ||
+				strings.Contains(strings.ToLower(iss.Status.Name), q) {
+				result = append(result, iss)
 			}
 		}
-	} else {
-		base = v.issues
+		v.filteredCache = result
 	}
-
-	if v.searchQuery == "" {
-		v.filteredCache = base
-		v.cacheDirty = false
-		return base
-	}
-
-	q := strings.ToLower(v.searchQuery)
-	var res []jira.Issue
-	for _, iss := range base {
-		if strings.Contains(strings.ToLower(iss.Key), q) ||
-			strings.Contains(strings.ToLower(iss.Summary), q) ||
-			strings.Contains(strings.ToLower(iss.Status.Name), q) {
-			res = append(res, iss)
-		}
-	}
-	v.filteredCache = res
 	v.cacheDirty = false
-	return res
+	return v.filteredCache
 }
 
 func (v *AppView) getFilteredIssues() []jira.Issue {
@@ -589,15 +588,19 @@ func (v *AppView) snapshot() appViewStateSnapshot {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
-	instances := make([]jira.InstanceConfig, len(v.config.Instances))
-	copy(instances, v.config.Instances)
+	cfg := v.config.Clone()
+	instances := cfg.Instances
 
-	issues := make([]jira.Issue, len(v.issues))
-	copy(issues, v.issues)
+	// Fan mode only draws filtered issues; status mode draws no tickets.
+	var issues []jira.Issue
+	if v.state != window.StateFan && !v.showStatus {
+		issues = make([]jira.Issue, len(v.issues))
+		copy(issues, v.issues)
+	}
 
-	filtered := v.getFilteredIssuesLocked()
 	var filteredClone []jira.Issue
-	if !v.showStatus {
+	if v.state != window.StateRest && !v.showStatus {
+		filtered := v.getFilteredIssuesLocked()
 		filteredClone = make([]jira.Issue, len(filtered))
 		copy(filteredClone, filtered)
 	}
@@ -606,36 +609,37 @@ func (v *AppView) snapshot() appViewStateSnapshot {
 	copy(monitors, v.monitors)
 
 	return appViewStateSnapshot{
-		bounds:          v.Bounds(),
-		state:           v.state,
-		showSettings:    v.showSettings,
-		showStatus:      v.showStatus,
-		statusReport:    v.statusReport,
-		hoveredStatus:   v.hoveredStatus,
-		dockSide:        v.dockSide,
-		selectedMonitor: v.selectedMonitor,
-		monitors:        monitors,
-		alwaysOnTop:     v.alwaysOnTop,
-		autoHide:        v.autoHide,
-		isTucked:        v.isTucked,
-		issues:          issues,
-		filteredIssues:  filteredClone,
-		activeIdx:       v.activeIdx,
-		activeTheme:     v.activeTheme,
-		toast:           v.toast,
-		scrollY:         v.scrollY,
-		searchQuery:     v.searchQuery,
-		searchActive:    v.searchActive,
-		activeInstIdx:   v.activeInstIdx,
-		selectedInstIdx: v.selectedInstIdx,
-		hoveredTabIdx:   v.hoveredTabIdx,
-		hoveredSettings: v.hoveredSettings,
-		instances:       instances,
-		nameVal:         v.nameVal,
-		urlVal:          v.urlVal,
-		emailVal:        v.emailVal,
-		tokenVal:        v.tokenVal,
-		jqlVal:          v.jqlVal,
+		bounds:            v.Bounds(),
+		state:             v.state,
+		showSettings:      v.showSettings,
+		showStatus:        v.showStatus,
+		statusReport:      v.statusReport,
+		hoveredStatus:     v.hoveredStatus,
+		dockSide:          v.dockSide,
+		selectedMonitor:   v.selectedMonitor,
+		monitors:          monitors,
+		alwaysOnTop:       v.alwaysOnTop,
+		autoHide:          v.autoHide,
+		isTucked:          v.isTucked,
+		issues:            issues,
+		filteredIssues:    filteredClone,
+		activeIdx:         v.activeIdx,
+		activeTheme:       v.activeTheme,
+		toast:             v.toast,
+		scrollY:           v.scrollY,
+		searchQuery:       v.searchQuery,
+		searchActive:      v.searchActive,
+		activeInstIdx:     v.activeInstIdx,
+		selectedInstIdx:   v.selectedInstIdx,
+		hoveredTabIdx:     v.hoveredTabIdx,
+		hoveredSettings:   v.hoveredSettings,
+		settingsSection:   v.settingsSection,
+		instances:         instances,
+		nameVal:           v.nameVal,
+		urlVal:            v.urlVal,
+		emailVal:          v.emailVal,
+		tokenVal:          v.tokenVal,
+		jqlVal:            v.jqlVal,
 		intervalVal:       v.intervalVal,
 		statusIntervalVal: v.statusIntervalVal,
 		colorVal:          v.colorVal,
@@ -646,7 +650,7 @@ func (v *AppView) snapshot() appViewStateSnapshot {
 		selectAll:         v.selectAll,
 		statusMsg:         v.statusMsg,
 		version:           v.version,
-		config:            v.config,
+		config:            cfg,
 	}
 }
 
@@ -949,7 +953,7 @@ func (v *AppView) RefreshStatus() {
 
 	go func() {
 		defer v.wg.Done()
-		rep, err := client.FetchReport()
+		rep, err := client.FetchReportContext(v.ctx)
 		select {
 		case <-v.ctx.Done():
 			return
@@ -1125,7 +1129,6 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	w := float32(expectedW)
 	h := float32(expectedH)
 	b := geometry.NewRect(s.bounds.Min.X, s.bounds.Min.Y, w, h)
-
 
 	// =========================================================================
 	// 1. STATE REST: macOS Dock Glass Capsule with Complete Crisp White Border
@@ -1410,7 +1413,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 					if s.dockSide == window.DockSideLeft {
 						tabX = b.Min.X + 11 // Lift inward to the right
 					} else {
-						tabX = b.Min.X + 3  // Lift inward to the left
+						tabX = b.Min.X + 3 // Lift inward to the left
 					}
 					tabW = w - 10
 				}
@@ -1925,370 +1928,6 @@ func (v *AppView) drawStatusPanel(ctx widget.Context, canvas widget.Canvas, r ge
 	canvas.DrawText("Open status.atlassian.com ↗", footBtnRect, 9, widget.RGBA8(210, 230, 255, 255), false, widget.TextAlignCenter)
 }
 
-func (v *AppView) drawSettingsOverlay(ctx widget.Context, canvas widget.Canvas, r geometry.Rect, s appViewStateSnapshot) {
-	radius := float32(14)
-	canvas.DrawRoundRect(r, widget.RGBA8(18, 22, 32, 250), radius)
-	canvas.StrokeRoundRect(r, widget.RGBA8(255, 255, 255, 70), radius, 1.0)
-
-	// 1. Header Title & Top Controls
-	hdrRect := geometry.NewRect(r.Min.X+20, r.Min.Y+14, 250, 22)
-	canvas.DrawText("Jira Instances & Credentials", hdrRect, 14, widget.RGBA8(245, 250, 255, 255), true, widget.TextAlignLeft)
-
-	if s.version != "" {
-		vRect := geometry.NewRect(r.Min.X+236, r.Min.Y+15, 52, 19)
-		canvas.DrawRoundRect(vRect, widget.RGBA8(40, 52, 75, 220), 4)
-		canvas.StrokeRoundRect(vRect, widget.RGBA8(255, 255, 255, 40), 4, 1.0)
-		canvas.DrawText("v"+s.version, vRect, 10, widget.RGBA8(160, 195, 240, 255), true, widget.TextAlignCenter)
-	}
-
-	// Load .env button
-	envRect := geometry.NewRect(r.Min.X+r.Width()-155, r.Min.Y+12, 75, 24)
-	canvas.DrawRoundRect(envRect, widget.RGBA8(48, 58, 78, 255), 4)
-	canvas.DrawText("Load .env", envRect, 10, widget.RGBA8(220, 235, 255, 255), false, widget.TextAlignCenter)
-
-	// Close button
-	closeRect := geometry.NewRect(r.Min.X+r.Width()-70, r.Min.Y+12, 50, 24)
-	canvas.DrawRoundRect(closeRect, widget.RGBA8(38, 48, 68, 255), 4)
-	canvas.DrawText("Close", closeRect, 10, widget.RGBA8(240, 245, 255, 255), false, widget.TextAlignCenter)
-
-	// 2. Dedicated Row for Instance Tabs & Add Button
-	tabRowY := r.Min.Y + 44
-	instStartX := r.Min.X + 20
-	tabW := float32(110)
-	tabGap := float32(6)
-
-	for idx, inst := range s.instances {
-		instTabX := instStartX + float32(idx)*(tabW+tabGap)
-		instTabRect := geometry.NewRect(instTabX, tabRowY, tabW, 26)
-
-		tabBg := widget.RGBA8(32, 40, 56, 255)
-		tabBorder := widget.RGBA8(255, 255, 255, 30)
-		if idx == s.selectedInstIdx {
-			tabBg = widget.RGBA8(59, 130, 246, 220)
-			tabBorder = widget.RGBA8(255, 255, 255, 160)
-		}
-		canvas.DrawRoundRect(instTabRect, tabBg, 5)
-		canvas.StrokeRoundRect(instTabRect, tabBorder, 5, 1.0)
-
-		name := inst.Name
-		if name == "" {
-			name = fmt.Sprintf("Inst %d", idx+1)
-		}
-		if len(name) > 14 {
-			name = name[:12] + ".."
-		}
-		canvas.DrawText(name, geometry.NewRect(instTabX+4, tabRowY+6, tabW-8, 14), 10, widget.RGBA8(245, 250, 255, 255), true, widget.TextAlignCenter)
-	}
-
-	// ➕ Add Instance Button
-	addInstX := instStartX + float32(len(s.instances))*(tabW+tabGap)
-	addRect := geometry.NewRect(addInstX, tabRowY, 80, 26)
-	canvas.DrawRoundRect(addRect, widget.RGBA8(40, 56, 78, 255), 5)
-	canvas.StrokeRoundRect(addRect, widget.RGBA8(96, 165, 250, 100), 5, 1.0)
-	canvas.DrawText("+ Add", addRect, 10, widget.RGBA8(210, 235, 255, 255), true, widget.TextAlignCenter)
-
-	// Separator below instance tabs
-	sepY := tabRowY + 34
-	canvas.DrawLine(geometry.Pt(r.Min.X+20, sepY), geometry.Pt(r.Min.X+r.Width()-20, sepY), widget.RGBA8(255, 255, 255, 30), 1.0)
-
-	// 3. 5 Interactive Fields for the selected instance
-	labels := []string{
-		"Instance Label / Name",
-		"Jira Base URL (e.g. https://company.atlassian.net)",
-		"User Email",
-		"API Token (click to type or paste with ⌘V)",
-		"Custom JQL Query",
-	}
-	rawVals := []string{s.nameVal, s.urlVal, s.emailVal, s.tokenVal, s.jqlVal}
-
-	startY := sepY + 12
-	blinkOn := (time.Now().UnixMilli()/500)%2 == 0
-
-	for i, label := range labels {
-		fIdx := i + 1
-		y := startY + float32(i*45)
-		isFocused := (s.activeField == fIdx)
-
-		lblRect := geometry.NewRect(r.Min.X+20, y, r.Width()-40, 14)
-		canvas.DrawText(label, lblRect, 10, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
-
-		inpRect := geometry.NewRect(r.Min.X+20, y+16, r.Width()-40, 24)
-		bg := widget.RGBA8(14, 18, 26, 255)
-		border := widget.RGBA8(255, 255, 255, 20)
-		if isFocused {
-			bg = widget.RGBA8(22, 28, 42, 255)
-			border = ColorStatusToDo
-		}
-		canvas.DrawRoundRect(inpRect, bg, 4)
-		canvas.StrokeRoundRect(inpRect, border, 4, 1.0)
-
-		rawVal := rawVals[i]
-		displayVal := rawVal
-		if fIdx == 4 && !isFocused && len(rawVal) > 0 {
-			displayVal = maskToken(rawVal)
-		}
-
-		textX := inpRect.Min.X + 8
-		textY := inpRect.Min.Y + 5
-
-		canvas.PushClip(geometry.NewRect(inpRect.Min.X+4, inpRect.Min.Y+2, inpRect.Width()-8, inpRect.Height()-4))
-		if displayVal == "" && !isFocused {
-			vRect := geometry.NewRect(textX, textY, inpRect.Width()-16, 14)
-			canvas.DrawText("(click to type or paste with ⌘V)", vRect, 11, widget.RGBA8(100, 116, 139, 255), false, widget.TextAlignLeft)
-		} else {
-			if isFocused && s.selectAll && len(displayVal) > 0 {
-				selWidth := measureTextWidth(displayVal, 11) + 4
-				if selWidth > inpRect.Width()-16 {
-					selWidth = inpRect.Width() - 16
-				}
-				selRect := geometry.NewRect(textX-2, textY-1, selWidth, 16)
-				canvas.DrawRoundRect(selRect, widget.RGBA8(59, 130, 246, 180), 2)
-			}
-
-			vRect := geometry.NewRect(textX, textY, inpRect.Width()-16, 14)
-			canvas.DrawText(displayVal, vRect, 11, widget.RGBA8(240, 245, 255, 255), false, widget.TextAlignLeft)
-
-			if isFocused && blinkOn && !s.selectAll {
-				cp := s.cursorPos
-				if cp > len(rawVal) {
-					cp = len(rawVal)
-				}
-				cursorOffset := measureTextWidth(rawVal[:cp], 11)
-				cursorX := textX + cursorOffset + 1.0
-				if cursorX > inpRect.Max.X-6 {
-					cursorX = inpRect.Max.X - 6
-				}
-				cursorTop := geometry.Pt(cursorX, inpRect.Min.Y+4)
-				cursorBottom := geometry.Pt(cursorX, inpRect.Max.Y-4)
-				canvas.DrawLine(cursorTop, cursorBottom, widget.RGBA8(255, 255, 255, 240), 1.5)
-			}
-		}
-		canvas.PopClip()
-	}
-
-	// 4. Profile Accent Color Picker
-	colorRowY := startY + float32(len(labels)*45) + 2
-	colorLblRect := geometry.NewRect(r.Min.X+20, colorRowY, 200, 14)
-	canvas.DrawText("Profile Accent Color", colorLblRect, 10, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
-
-	currColorHex := s.colorVal
-	if currColorHex == "" && s.selectedInstIdx < len(s.instances) {
-		currColorHex = s.instances[s.selectedInstIdx].Color
-	}
-	if currColorHex == "" {
-		currColorHex = "#38bdf8"
-	}
-
-	for k, preset := range ProfilePresets {
-		chipCenter := geometry.Pt(r.Min.X+30+float32(k)*28, colorRowY+24)
-		chipColor := preset.Color
-		isSelected := strings.EqualFold(currColorHex, preset.Hex)
-
-		if isSelected {
-			canvas.DrawCircle(chipCenter, 11, widget.RGBA8(255, 255, 255, 220))
-			canvas.DrawCircle(chipCenter, 9, chipColor)
-		} else {
-			canvas.DrawCircle(chipCenter, 8.5, chipColor)
-			canvas.StrokeCircle(chipCenter, 8.5, widget.RGBA8(255, 255, 255, 50), 1.0)
-		}
-	}
-
-	hexRect := geometry.NewRect(r.Min.X+30+float32(len(ProfilePresets))*28+8, colorRowY+17, 70, 16)
-	canvas.DrawText(currColorHex, hexRect, 10, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
-
-	// 5. Display & Docking Controls
-	dockSecY := colorRowY + 40
-	canvas.DrawLine(geometry.Pt(r.Min.X+20, dockSecY), geometry.Pt(r.Min.X+r.Width()-20, dockSecY), widget.RGBA8(255, 255, 255, 30), 1.0)
-
-	dockLblRect := geometry.NewRect(r.Min.X+20, dockSecY+8, 250, 14)
-	canvas.DrawText("Display, Docking & Window Controls", dockLblRect, 10, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
-
-	// Row 1: Edge Docking & Displays
-	row1Y := dockSecY + 24
-
-	leftEdgeRect := geometry.NewRect(r.Min.X+20, row1Y, 95, 24)
-	leftBg := widget.RGBA8(32, 40, 56, 255)
-	leftBorder := widget.RGBA8(255, 255, 255, 30)
-	if s.dockSide == window.DockSideLeft {
-		leftBg = widget.RGBA8(59, 130, 246, 200)
-		leftBorder = widget.RGBA8(255, 255, 255, 180)
-	}
-	canvas.DrawRoundRect(leftEdgeRect, leftBg, 4)
-	canvas.StrokeRoundRect(leftEdgeRect, leftBorder, 4, 1.0)
-	canvas.DrawText("◧ Left Edge", leftEdgeRect, 10, widget.RGBA8(240, 245, 255, 255), true, widget.TextAlignCenter)
-
-	rightEdgeRect := geometry.NewRect(r.Min.X+122, row1Y, 95, 24)
-	rightBg := widget.RGBA8(32, 40, 56, 255)
-	rightBorder := widget.RGBA8(255, 255, 255, 30)
-	if s.dockSide == window.DockSideRight {
-		rightBg = widget.RGBA8(59, 130, 246, 200)
-		rightBorder = widget.RGBA8(255, 255, 255, 180)
-	}
-	canvas.DrawRoundRect(rightEdgeRect, rightBg, 4)
-	canvas.StrokeRoundRect(rightEdgeRect, rightBorder, 4, 1.0)
-	canvas.DrawText("◨ Right Edge", rightEdgeRect, 10, widget.RGBA8(240, 245, 255, 255), true, widget.TextAlignCenter)
-
-	monStartX := r.Min.X + 228
-	for m, mon := range s.monitors {
-		monRect := geometry.NewRect(monStartX+float32(m)*86, row1Y, 80, 24)
-		monBg := widget.RGBA8(32, 40, 56, 255)
-		monBorder := widget.RGBA8(255, 255, 255, 30)
-		if s.selectedMonitor == mon.Index {
-			monBg = widget.RGBA8(16, 185, 129, 200)
-			monBorder = widget.RGBA8(255, 255, 255, 180)
-		}
-		canvas.DrawRoundRect(monRect, monBg, 4)
-		canvas.StrokeRoundRect(monRect, monBorder, 4, 1.0)
-		canvas.DrawText(fmt.Sprintf("Disp %d", mon.Index+1), monRect, 10, widget.RGBA8(240, 245, 255, 255), true, widget.TextAlignCenter)
-	}
-
-	// Row 2: Always On Top & Auto-Hide Mode
-	row2Y := dockSecY + 54
-
-	aotRect := geometry.NewRect(r.Min.X+20, row2Y, 135, 24)
-	aotBg := widget.RGBA8(32, 40, 56, 255)
-	aotBorder := widget.RGBA8(255, 255, 255, 30)
-	aotTxt := "Floating: Normal"
-	if s.alwaysOnTop {
-		aotBg = widget.RGBA8(59, 130, 246, 180)
-		aotBorder = widget.RGBA8(255, 255, 255, 160)
-		aotTxt = "✓ Always On Top"
-	}
-	canvas.DrawRoundRect(aotRect, aotBg, 4)
-	canvas.StrokeRoundRect(aotRect, aotBorder, 4, 1.0)
-	canvas.DrawText(aotTxt, aotRect, 10, widget.RGBA8(240, 245, 255, 255), false, widget.TextAlignCenter)
-
-	ahRect := geometry.NewRect(r.Min.X+162, row2Y, 195, 24)
-	ahBg := widget.RGBA8(32, 40, 56, 255)
-	ahBorder := widget.RGBA8(255, 255, 255, 30)
-	ahTxt := "Auto-Hide: Disabled"
-	if s.autoHide {
-		ahBg = widget.RGBA8(168, 85, 247, 180)
-		ahBorder = widget.RGBA8(255, 255, 255, 160)
-		ahTxt = "✓ Auto-Hide (macOS Dock)"
-	}
-	canvas.DrawRoundRect(ahRect, ahBg, 4)
-	canvas.StrokeRoundRect(ahRect, ahBorder, 4, 1.0)
-	canvas.DrawText(ahTxt, ahRect, 10, widget.RGBA8(240, 245, 255, 255), false, widget.TextAlignCenter)
-
-	// 6. Background Sync & Atlassian Status Monitoring
-	syncSecY := row2Y + 34
-	canvas.DrawLine(geometry.Pt(r.Min.X+20, syncSecY), geometry.Pt(r.Min.X+r.Width()-20, syncSecY), widget.RGBA8(255, 255, 255, 30), 1.0)
-
-	syncLblRect := geometry.NewRect(r.Min.X+20, syncSecY+6, 320, 14)
-	canvas.DrawText("Background Sync & Atlassian Health Monitoring", syncLblRect, 10, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
-
-	syncRowY := syncSecY + 24
-
-	// Atlassian Status Check Toggle
-	statusToggleRect := geometry.NewRect(r.Min.X+20, syncRowY, 175, 24)
-	statBg := widget.RGBA8(32, 40, 56, 255)
-	statBorder := widget.RGBA8(255, 255, 255, 30)
-	statTxt := "✕ Status Check: OFF"
-	if s.config.StatusCheckEnabled {
-		statBg = widget.RGBA8(16, 185, 129, 190)
-		statBorder = widget.RGBA8(255, 255, 255, 170)
-		statTxt = "✓ Atlassian Status: ON"
-	}
-	canvas.DrawRoundRect(statusToggleRect, statBg, 4)
-	canvas.StrokeRoundRect(statusToggleRect, statBorder, 4, 1.0)
-	canvas.DrawText(statTxt, statusToggleRect, 10, widget.RGBA8(240, 245, 255, 255), false, widget.TextAlignCenter)
-
-	// Jira Sync Interval (Field 6)
-	syncLbl := geometry.NewRect(r.Min.X+205, syncRowY+5, 60, 14)
-	canvas.DrawText("Sync (s):", syncLbl, 9, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
-
-	syncInpRect := geometry.NewRect(r.Min.X+260, syncRowY, 60, 24)
-	syncInpBg := widget.RGBA8(14, 18, 26, 255)
-	syncInpBorder := widget.RGBA8(255, 255, 255, 20)
-	if s.activeField == 6 {
-		syncInpBg = widget.RGBA8(22, 28, 42, 255)
-		syncInpBorder = ColorStatusToDo
-	}
-	canvas.DrawRoundRect(syncInpRect, syncInpBg, 4)
-	canvas.StrokeRoundRect(syncInpRect, syncInpBorder, 4, 1.0)
-	canvas.DrawText(s.intervalVal, geometry.NewRect(syncInpRect.Min.X+4, syncInpRect.Min.Y+5, syncInpRect.Width()-8, 14), 11, widget.RGBA8(240, 245, 255, 255), false, widget.TextAlignCenter)
-
-	// Status Poll Interval (Field 7)
-	statLbl := geometry.NewRect(r.Min.X+330, syncRowY+5, 65, 14)
-	canvas.DrawText("Status (s):", statLbl, 9, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
-
-	statInpRect := geometry.NewRect(r.Min.X+395, syncRowY, 60, 24)
-	statInpBg := widget.RGBA8(14, 18, 26, 255)
-	statInpBorder := widget.RGBA8(255, 255, 255, 20)
-	if s.activeField == 7 {
-		statInpBg = widget.RGBA8(22, 28, 42, 255)
-		statInpBorder = ColorStatusToDo
-	}
-	canvas.DrawRoundRect(statInpRect, statInpBg, 4)
-	canvas.StrokeRoundRect(statInpRect, statInpBorder, 4, 1.0)
-	canvas.DrawText(s.statusIntervalVal, geometry.NewRect(statInpRect.Min.X+4, statInpRect.Min.Y+5, statInpRect.Width()-8, 14), 11, widget.RGBA8(240, 245, 255, 255), false, widget.TextAlignCenter)
-
-	// Presets: [1m] [5m] [15m]
-	p1Rect := geometry.NewRect(r.Min.X+468, syncRowY, 36, 24)
-	canvas.DrawRoundRect(p1Rect, widget.RGBA8(34, 44, 64, 255), 4)
-	canvas.DrawText("1m", p1Rect, 9, widget.RGBA8(210, 230, 255, 255), false, widget.TextAlignCenter)
-
-	p5Rect := geometry.NewRect(r.Min.X+508, syncRowY, 36, 24)
-	canvas.DrawRoundRect(p5Rect, widget.RGBA8(34, 44, 64, 255), 4)
-	canvas.DrawText("5m", p5Rect, 9, widget.RGBA8(210, 230, 255, 255), false, widget.TextAlignCenter)
-
-	p15Rect := geometry.NewRect(r.Min.X+548, syncRowY, 38, 24)
-	canvas.DrawRoundRect(p15Rect, widget.RGBA8(34, 44, 64, 255), 4)
-	canvas.DrawText("15m", p15Rect, 9, widget.RGBA8(210, 230, 255, 255), false, widget.TextAlignCenter)
-
-
-	// Status Message
-	if s.statusMsg != "" {
-		stMsg := s.statusMsg
-		if len(stMsg) > 75 {
-			stMsg = stMsg[:72] + "..."
-		}
-		stRect := geometry.NewRect(r.Min.X+20, r.Min.Y+r.Height()-72, r.Width()-40, 16)
-		canvas.DrawText(stMsg, stRect, 11, ColorStatusInProgress, false, widget.TextAlignLeft)
-	}
-
-	// 4. Bottom Action Row
-	btnY := r.Min.Y + r.Height() - 44
-
-	demoModeTxt := "● Live Jira"
-	demoBg := widget.RGBA8(16, 185, 129, 200)
-	demoFg := widget.RGBA8(255, 255, 255, 255)
-	if s.demoMode {
-		demoModeTxt = "⚠ Demo Mock Mode"
-		demoBg = widget.RGBA8(217, 119, 6, 220)
-		demoFg = widget.RGBA8(255, 255, 255, 255)
-	}
-	demoRect := geometry.NewRect(r.Min.X+20, btnY, 130, 28)
-	canvas.DrawRoundRect(demoRect, demoBg, 6)
-	canvas.DrawText(demoModeTxt, demoRect, 10, demoFg, false, widget.TextAlignCenter)
-
-	debugTxt := "Debug: OFF"
-	debugBg := widget.RGBA8(34, 42, 58, 255)
-	if s.debugMode {
-		debugTxt = "Debug: ON"
-		debugBg = widget.RGBA8(70, 45, 95, 255)
-	}
-	debugRect := geometry.NewRect(r.Min.X+156, btnY, 86, 28)
-	canvas.DrawRoundRect(debugRect, debugBg, 6)
-	canvas.DrawText(debugTxt, debugRect, 10, widget.RGBA8(240, 245, 255, 255), false, widget.TextAlignCenter)
-
-	testRect := geometry.NewRect(r.Min.X+248, btnY, 120, 28)
-	canvas.DrawRoundRect(testRect, widget.RGBA8(34, 42, 58, 255), 6)
-	canvas.DrawText("Test Connection", testRect, 10, widget.RGBA8(240, 245, 255, 255), false, widget.TextAlignCenter)
-
-	// Delete Instance Button (if more than 1 instance)
-	if len(s.instances) > 1 {
-		delRect := geometry.NewRect(r.Min.X+374, btnY, 70, 28)
-		canvas.DrawRoundRect(delRect, widget.RGBA8(80, 30, 40, 255), 6)
-		canvas.DrawText("Delete", delRect, 10, widget.RGBA8(255, 180, 190, 255), false, widget.TextAlignCenter)
-	}
-
-	saveRect := geometry.NewRect(r.Min.X+r.Width()-110, btnY, 90, 28)
-	canvas.DrawRoundRect(saveRect, ColorStatusInProgress, 6)
-	canvas.DrawText("Save All", saveRect, 11, widget.RGBA8(15, 20, 30, 255), true, widget.TextAlignCenter)
-}
-
 func (v *AppView) Event(ctx widget.Context, e event.Event) bool {
 	switch ev := e.(type) {
 	case *event.MouseEvent:
@@ -2563,6 +2202,10 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 }
 
 func (v *AppView) getActiveTargetLocked() *string {
+	if v.showSettings && ((v.settingsSection == settingsInstances && v.activeField > 5) ||
+		(v.settingsSection == settingsApplication && v.activeField < 6)) {
+		return nil
+	}
 	switch v.activeField {
 	case 1:
 		return &v.nameVal
@@ -2862,326 +2505,7 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 	// Settings Modal Clicks
 	if showSettings {
 		r := geometry.NewRect(cardStartX, b.Min.Y+8, cardAreaWidth, h-16)
-
-		// Top Controls
-		envRect := geometry.NewRect(r.Min.X+r.Width()-155, r.Min.Y+12, 75, 24)
-		if envRect.Contains(pos) {
-			v.mu.Lock()
-			cfg := v.config
-			loaded := jira.LoadFromDotEnv(&cfg)
-			if loaded {
-				v.config = cfg
-				v.loadInstanceFieldsLocked(v.selectedInstIdx)
-				v.statusMsg = "Credentials loaded from .env"
-				v.invalidateFilterCacheLocked()
-			}
-			v.mu.Unlock()
-			if loaded {
-				v.showToast("✓ Loaded credentials from .env")
-				v.MarkNeedsLayout()
-			} else {
-				v.showToast("No .env file found")
-			}
-			return true
-		}
-
-		closeRect := geometry.NewRect(r.Min.X+r.Width()-70, r.Min.Y+12, 50, 24)
-		if closeRect.Contains(pos) {
-			v.SetState(window.StateFan)
-			return true
-		}
-
-		// Instance Tabs Row Clicks
-		tabRowY := r.Min.Y + 44
-		instStartX := r.Min.X + 20
-		tabW := float32(110)
-		tabGap := float32(6)
-
-		v.mu.Lock()
-		instLen := len(v.config.Instances)
-		v.mu.Unlock()
-
-		for idx := 0; idx < instLen; idx++ {
-			instTabX := instStartX + float32(idx)*(tabW+tabGap)
-			instTabRect := geometry.NewRect(instTabX, tabRowY, tabW, 26)
-			if instTabRect.Contains(pos) {
-				v.mu.Lock()
-				v.saveCurrentInstanceFieldsLocked()
-				v.loadInstanceFieldsLocked(idx)
-				v.statusMsg = ""
-				v.mu.Unlock()
-				v.MarkNeedsLayout()
-				return true
-			}
-		}
-
-		// + Add Instance Button Click
-		addInstX := instStartX + float32(instLen)*(tabW+tabGap)
-		addRect := geometry.NewRect(addInstX, tabRowY, 80, 26)
-		if addRect.Contains(pos) {
-			v.mu.Lock()
-			v.saveCurrentInstanceFieldsLocked()
-			newIdx := len(v.config.Instances) + 1
-			newInst := jira.InstanceConfig{
-				ID:       fmt.Sprintf("inst-%d", time.Now().UnixNano()),
-				Name:     fmt.Sprintf("Instance %d", newIdx),
-				BaseURL:  "",
-				Email:    v.emailVal,
-				APIToken: "",
-				JQLQuery: "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC",
-				Color:    "#38bdf8",
-			}
-			v.config.Instances = append(v.config.Instances, newInst)
-			v.loadInstanceFieldsLocked(len(v.config.Instances) - 1)
-			v.invalidateFilterCacheLocked()
-			v.mu.Unlock()
-			v.showToast("Added new Jira instance")
-			v.MarkNeedsLayout()
-			return true
-		}
-
-		// Profile Accent Color Chips Clicks
-		labels := []string{
-			"Instance Label / Name",
-			"Jira Base URL (e.g. https://company.atlassian.net)",
-			"User Email",
-			"API Token (click to type or paste with ⌘V)",
-			"Custom JQL Query",
-		}
-		sepY := tabRowY + 34
-		startY := sepY + 12
-		colorRowY := startY + float32(len(labels)*45) + 2
-
-		for k, preset := range ProfilePresets {
-			chipCenter := geometry.Pt(r.Min.X+30+float32(k)*28, colorRowY+24)
-			dx := pos.X - chipCenter.X
-			dy := pos.Y - chipCenter.Y
-			if dx*dx+dy*dy <= 12*12 {
-				v.mu.Lock()
-				v.colorVal = preset.Hex
-				if v.selectedInstIdx < len(v.config.Instances) {
-					v.config.Instances[v.selectedInstIdx].Color = preset.Hex
-				}
-				v.mu.Unlock()
-				v.MarkNeedsLayout()
-				if v.onRedraw != nil {
-					v.onRedraw()
-				}
-				return true
-			}
-		}
-
-		// Display & Docking Controls Clicks
-		dockSecY := colorRowY + 40
-		row1Y := dockSecY + 24
-
-		leftEdgeRect := geometry.NewRect(r.Min.X+20, row1Y, 95, 24)
-		if leftEdgeRect.Contains(pos) {
-			v.SetDockSide(window.DockSideLeft)
-			return true
-		}
-		rightEdgeRect := geometry.NewRect(r.Min.X+122, row1Y, 95, 24)
-		if rightEdgeRect.Contains(pos) {
-			v.SetDockSide(window.DockSideRight)
-			return true
-		}
-
-		monStartX := r.Min.X + 228
-		v.mu.Lock()
-		mons := v.monitors
-		v.mu.Unlock()
-		for m, mon := range mons {
-			monRect := geometry.NewRect(monStartX+float32(m)*86, row1Y, 80, 24)
-			if monRect.Contains(pos) {
-				v.SetMonitor(mon.Index)
-				return true
-			}
-		}
-
-		// Row 2: Always On Top & Auto-Hide Mode
-		row2Y := dockSecY + 54
-		aotRect := geometry.NewRect(r.Min.X+20, row2Y, 135, 24)
-		if aotRect.Contains(pos) {
-			v.mu.Lock()
-			newAOT := !v.alwaysOnTop
-			v.mu.Unlock()
-			v.SetAlwaysOnTop(newAOT)
-			return true
-		}
-
-		ahRect := geometry.NewRect(r.Min.X+162, row2Y, 195, 24)
-		if ahRect.Contains(pos) {
-			v.mu.Lock()
-			newAH := !v.autoHide
-			v.mu.Unlock()
-			v.SetAutoHide(newAH)
-			return true
-		}
-
-		btnY := r.Min.Y + r.Height() - 44
-
-		// Mode Toggle
-		demoRect := geometry.NewRect(r.Min.X+20, btnY, 130, 28)
-		if demoRect.Contains(pos) {
-			v.mu.Lock()
-			v.demoMode = !v.demoMode
-			v.mu.Unlock()
-			v.MarkNeedsLayout()
-			return true
-		}
-
-		// Debug Toggle
-		debugRect := geometry.NewRect(r.Min.X+156, btnY, 86, 28)
-		if debugRect.Contains(pos) {
-			v.mu.Lock()
-			v.debugMode = !v.debugMode
-			v.mu.Unlock()
-			v.MarkNeedsLayout()
-			return true
-		}
-
-		// Test Connection
-		testRect := geometry.NewRect(r.Min.X+248, btnY, 120, 28)
-		if testRect.Contains(pos) {
-			v.testConn()
-			return true
-		}
-
-		// Delete Instance
-		if instLen > 1 {
-			delRect := geometry.NewRect(r.Min.X+374, btnY, 70, 28)
-			if delRect.Contains(pos) {
-				v.mu.Lock()
-				cur := v.selectedInstIdx
-				if cur >= 0 && cur < len(v.config.Instances) {
-					v.config.Instances = append(v.config.Instances[:cur], v.config.Instances[cur+1:]...)
-					if cur >= len(v.config.Instances) {
-						cur = len(v.config.Instances) - 1
-					}
-					v.loadInstanceFieldsLocked(cur)
-					v.invalidateFilterCacheLocked()
-				}
-				v.mu.Unlock()
-				v.showToast("Deleted instance")
-				v.MarkNeedsLayout()
-				return true
-			}
-		}
-
-		// Save All
-		saveRect := geometry.NewRect(r.Min.X+r.Width()-110, btnY, 90, 28)
-		if saveRect.Contains(pos) {
-			v.saveSettings()
-			return true
-		}
-
-		// Field click focus (Fields 1..5)
-		for i := 0; i < 5; i++ {
-			y := startY + float32(i*45)
-			inpRect := geometry.NewRect(r.Min.X+20, y+16, r.Width()-40, 24)
-			if inpRect.Contains(pos) {
-				v.mu.Lock()
-				v.activeField = i + 1
-				v.selectAll = false
-				tgt := v.getActiveTargetLocked()
-				if tgt != nil {
-					clickRelX := pos.X - (inpRect.Min.X + 8)
-					v.cursorPos = getCursorIndexFromX(*tgt, 11, clickRelX)
-				} else {
-					v.cursorPos = 0
-				}
-				v.mu.Unlock()
-				v.MarkNeedsLayout()
-				return true
-			}
-		}
-
-		syncSecY := row2Y + 34
-		syncRowY := syncSecY + 24
-
-		// Field 6: Jira Sync Interval focus
-		syncInpRect := geometry.NewRect(r.Min.X+260, syncRowY, 60, 24)
-		if syncInpRect.Contains(pos) {
-			v.mu.Lock()
-			v.activeField = 6
-			v.selectAll = false
-			tgt := v.getActiveTargetLocked()
-			if tgt != nil {
-				clickRelX := pos.X - (syncInpRect.Min.X + 4)
-				v.cursorPos = getCursorIndexFromX(*tgt, 11, clickRelX)
-			} else {
-				v.cursorPos = 0
-			}
-			v.mu.Unlock()
-			v.MarkNeedsLayout()
-			return true
-		}
-
-		// Field 7: Status Poll Interval focus
-		statInpRect := geometry.NewRect(r.Min.X+395, syncRowY, 60, 24)
-		if statInpRect.Contains(pos) {
-			v.mu.Lock()
-			v.activeField = 7
-			v.selectAll = false
-			tgt := v.getActiveTargetLocked()
-			if tgt != nil {
-				clickRelX := pos.X - (statInpRect.Min.X + 4)
-				v.cursorPos = getCursorIndexFromX(*tgt, 11, clickRelX)
-			} else {
-				v.cursorPos = 0
-			}
-			v.mu.Unlock()
-			v.MarkNeedsLayout()
-			return true
-		}
-
-		// Atlassian Status Check Toggle
-		statusToggleRect := geometry.NewRect(r.Min.X+20, syncRowY, 175, 24)
-		if statusToggleRect.Contains(pos) {
-			v.mu.Lock()
-			v.config.StatusCheckEnabled = !v.config.StatusCheckEnabled
-			v.mu.Unlock()
-			v.MarkNeedsLayout()
-			return true
-		}
-
-		// Presets [1m] [5m] [15m]
-		p1Rect := geometry.NewRect(r.Min.X+468, syncRowY, 36, 24)
-		if p1Rect.Contains(pos) {
-			v.mu.Lock()
-			v.intervalVal = "60"
-			v.statusIntervalVal = "60"
-			v.mu.Unlock()
-			v.MarkNeedsLayout()
-			return true
-		}
-
-		p5Rect := geometry.NewRect(r.Min.X+508, syncRowY, 36, 24)
-		if p5Rect.Contains(pos) {
-			v.mu.Lock()
-			v.intervalVal = "300"
-			v.statusIntervalVal = "300"
-			v.mu.Unlock()
-			v.MarkNeedsLayout()
-			return true
-		}
-
-		p15Rect := geometry.NewRect(r.Min.X+548, syncRowY, 38, 24)
-		if p15Rect.Contains(pos) {
-			v.mu.Lock()
-			v.intervalVal = "900"
-			v.statusIntervalVal = "900"
-			v.mu.Unlock()
-			v.MarkNeedsLayout()
-			return true
-		}
-
-		v.mu.Lock()
-		v.activeField = 0
-		v.selectAll = false
-		v.mu.Unlock()
-		v.MarkNeedsLayout()
-		return true
+		return v.handleSettingsClick(r, pos)
 	}
 
 	return false
@@ -3433,6 +2757,39 @@ func (v *AppView) handleKey(ev *event.KeyEvent) bool {
 		}
 	}
 
+	// Keyboard navigation stays within the visible settings page, including
+	// when no field is focused after switching sections.
+	if showSettings && !isCmdOrCtrl && (ev.Key == event.KeyTab || ev.Key == event.KeyEnter) {
+		v.mu.Lock()
+		first, last := 1, 5
+		if v.settingsSection == settingsApplication {
+			first, last = 6, 7
+		}
+		if v.activeField < first || v.activeField > last {
+			v.activeField = first
+			if isShift {
+				v.activeField = last
+			}
+		} else if isShift {
+			v.activeField--
+			if v.activeField < first {
+				v.activeField = last
+			}
+		} else {
+			v.activeField++
+			if v.activeField > last {
+				v.activeField = first
+			}
+		}
+		v.selectAll = false
+		if target := v.getActiveTargetLocked(); target != nil {
+			v.cursorPos = len(*target)
+		}
+		v.mu.Unlock()
+		v.MarkNeedsLayout()
+		return true
+	}
+
 	// Settings text editing
 	if showSettings && activeField > 0 {
 		v.mu.Lock()
@@ -3554,20 +2911,6 @@ func (v *AppView) handleKey(ev *event.KeyEvent) bool {
 			return true
 		}
 
-		// 8. Tab / Enter: Cycle next field
-		if ev.Key == event.KeyEnter || ev.Key == event.KeyTab {
-			v.activeField = (v.activeField % 7) + 1
-			v.selectAll = false
-			nextTgt := v.getActiveTargetLocked()
-			if nextTgt != nil {
-				v.cursorPos = len(*nextTgt)
-			} else {
-				v.cursorPos = 0
-			}
-			v.MarkNeedsLayout()
-			return true
-		}
-
 		// 9. Standard Printable Characters
 		if ev.Rune >= 32 && !hasMod {
 			if v.activeField == 6 || v.activeField == 7 {
@@ -3617,6 +2960,11 @@ func (v *AppView) testConn() {
 	testBaseURL := strings.TrimSpace(v.urlVal)
 	testEmail := strings.TrimSpace(v.emailVal)
 	testToken := sanitizeToken(v.tokenVal)
+	testedInstIdx := v.selectedInstIdx
+	testedInstID := ""
+	if testedInstIdx >= 0 && testedInstIdx < len(v.config.Instances) {
+		testedInstID = v.config.Instances[testedInstIdx].ID
+	}
 	v.statusMsg = fmt.Sprintf("Testing connection for %s...", nameVal)
 	v.wg.Add(1)
 	v.mu.Unlock()
@@ -3633,10 +2981,19 @@ func (v *AppView) testConn() {
 
 		v.mu.Lock()
 		defer v.mu.Unlock()
+		// Only update statusMsg if same instance and credentials still selected
+		if !v.showSettings || v.settingsSection != settingsInstances ||
+			v.selectedInstIdx != testedInstIdx || testedInstIdx < 0 || testedInstIdx >= len(v.config.Instances) ||
+			v.config.Instances[testedInstIdx].ID != testedInstID ||
+			strings.TrimSpace(v.urlVal) != testBaseURL ||
+			strings.TrimSpace(v.emailVal) != testEmail || sanitizeToken(v.tokenVal) != testToken {
+			return
+		}
+
 		if err != nil {
-			v.statusMsg = fmt.Sprintf("Error: %v", err)
+			v.statusMsg = fmt.Sprintf("%s: connection failed", nameVal)
 		} else {
-			v.statusMsg = fmt.Sprintf("Connected as %s", user)
+			v.statusMsg = fmt.Sprintf("%s: connected as %s", nameVal, user)
 		}
 		v.MarkNeedsLayout()
 	}()
@@ -3655,14 +3012,7 @@ func (v *AppView) saveSettings() {
 	}
 	v.config.ApplyDefaults()
 
-	// If credentials are configured on any instance, automatically switch to Live Jira mode
-	for _, inst := range v.config.Instances {
-		if inst.BaseURL != "" && inst.APIToken != "" {
-			v.demoMode = false
-			break
-		}
-	}
-
+	// Respect explicit demo mode choice; do not auto-override based on credentials
 	v.config.DemoMode = v.demoMode
 	v.config.DebugMode = v.debugMode
 	if len(v.config.Instances) > 0 {
@@ -3671,13 +3021,25 @@ func (v *AppView) saveSettings() {
 		v.config.APIToken = v.config.Instances[0].APIToken
 		v.config.JQLQuery = v.config.Instances[0].JQLQuery
 	}
-	cfg := v.config
-	v.showSettings = false
+	cfg := v.config.Clone()
 	onReload := v.onConfigReload
 	v.invalidateFilterCacheLocked()
 	v.mu.Unlock()
 
-	_ = jira.SaveConfig(cfg)
+	// Save config first, then update client
+	if err := jira.SaveConfig(cfg); err != nil {
+		v.mu.Lock()
+		v.statusMsg = "Save failed"
+		v.mu.Unlock()
+		v.showToast("Settings save failed")
+		v.MarkNeedsLayout()
+		return
+	}
+
+	v.mu.Lock()
+	v.showSettings = false
+	v.mu.Unlock()
+
 	v.client.UpdateConfig(cfg)
 	if onReload != nil {
 		onReload()
@@ -3747,4 +3109,3 @@ func pasteFromClipboard() string {
 	}
 	return strings.TrimRight(string(out), "\r\n")
 }
-

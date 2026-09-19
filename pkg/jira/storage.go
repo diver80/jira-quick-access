@@ -17,6 +17,7 @@ import (
 var (
 	configMu         sync.RWMutex
 	customConfigPath string
+	saveMu           sync.Mutex // Serializes SaveConfig to prevent concurrent writes/backups
 )
 
 // SetConfigFilePathForTesting overrides the configuration file path (e.g. for testing).
@@ -128,66 +129,72 @@ func LoadConfig() Config {
 	filePath := getConfigFilePath()
 
 	data, err := os.ReadFile(filePath)
-	if err != nil {
-		// Attempt fallback to .bak if primary config is missing
-		data, err = os.ReadFile(filePath + ".bak")
-	}
+	var saved Config
 	if err == nil {
-		var saved Config
-		if err := json.Unmarshal(data, &saved); err == nil {
-			if len(saved.Instances) > 0 {
-				cfg.Instances = saved.Instances
-			}
-			if saved.ActiveInstID != "" {
-				cfg.ActiveInstID = saved.ActiveInstID
-			}
-			if saved.BaseURL != "" {
-				cfg.BaseURL = saved.BaseURL
-			}
-			if saved.Email != "" {
-				cfg.Email = saved.Email
-			}
-			if saved.APIToken != "" {
-				cfg.APIToken = saved.APIToken
-			}
-			if saved.JQLQuery != "" {
-				cfg.JQLQuery = saved.JQLQuery
-			}
-			if saved.PollInterval > 0 {
-				cfg.PollInterval = saved.PollInterval
-			}
-			if bytes.Contains(data, []byte("\"status_check_enabled\"")) {
-				cfg.StatusCheckEnabled = saved.StatusCheckEnabled
-			} else {
-				cfg.StatusCheckEnabled = true
-			}
-			if saved.StatusPollInterval > 0 {
-				cfg.StatusPollInterval = saved.StatusPollInterval
-			} else {
-				cfg.StatusPollInterval = 300
-			}
-			if saved.BranchPrefix != "" {
-				cfg.BranchPrefix = saved.BranchPrefix
-			}
-			if len(saved.PinnedKeys) > 0 {
-				cfg.PinnedKeys = saved.PinnedKeys
-			}
-			cfg.DemoMode = saved.DemoMode
-			cfg.DebugMode = saved.DebugMode
-			cfg.DockSide = saved.DockSide
-			cfg.MonitorIndex = saved.MonitorIndex
-			if saved.PosYRatio > 0 && saved.PosYRatio <= 1.0 {
-				cfg.PosYRatio = saved.PosYRatio
-			} else {
-				cfg.PosYRatio = 0.5
-			}
-			if bytes.Contains(data, []byte("\"always_on_top\"")) {
-				cfg.AlwaysOnTop = saved.AlwaysOnTop
-			} else {
-				cfg.AlwaysOnTop = true
-			}
-			cfg.AutoHide = saved.AutoHide
+		err = json.Unmarshal(data, &saved)
+	}
+	if err != nil {
+		// Missing or corrupt primary: recover the last valid backup.
+		data, err = os.ReadFile(filePath + ".bak")
+		saved = Config{}
+		if err == nil {
+			err = json.Unmarshal(data, &saved)
 		}
+	}
+
+	if err == nil {
+		if len(saved.Instances) > 0 {
+			cfg.Instances = saved.Instances
+		}
+		if saved.ActiveInstID != "" {
+			cfg.ActiveInstID = saved.ActiveInstID
+		}
+		if saved.BaseURL != "" {
+			cfg.BaseURL = saved.BaseURL
+		}
+		if saved.Email != "" {
+			cfg.Email = saved.Email
+		}
+		if saved.APIToken != "" {
+			cfg.APIToken = saved.APIToken
+		}
+		if saved.JQLQuery != "" {
+			cfg.JQLQuery = saved.JQLQuery
+		}
+		if saved.PollInterval > 0 {
+			cfg.PollInterval = saved.PollInterval
+		}
+		if bytes.Contains(data, []byte("\"status_check_enabled\"")) {
+			cfg.StatusCheckEnabled = saved.StatusCheckEnabled
+		} else {
+			cfg.StatusCheckEnabled = true
+		}
+		if saved.StatusPollInterval > 0 {
+			cfg.StatusPollInterval = saved.StatusPollInterval
+		} else {
+			cfg.StatusPollInterval = 300
+		}
+		if saved.BranchPrefix != "" {
+			cfg.BranchPrefix = saved.BranchPrefix
+		}
+		if len(saved.PinnedKeys) > 0 {
+			cfg.PinnedKeys = saved.PinnedKeys
+		}
+		cfg.DemoMode = saved.DemoMode
+		cfg.DebugMode = saved.DebugMode
+		cfg.DockSide = saved.DockSide
+		cfg.MonitorIndex = saved.MonitorIndex
+		if saved.PosYRatio > 0 && saved.PosYRatio <= 1.0 {
+			cfg.PosYRatio = saved.PosYRatio
+		} else {
+			cfg.PosYRatio = 0.5
+		}
+		if bytes.Contains(data, []byte("\"always_on_top\"")) {
+			cfg.AlwaysOnTop = saved.AlwaysOnTop
+		} else {
+			cfg.AlwaysOnTop = true
+		}
+		cfg.AutoHide = saved.AutoHide
 	} else {
 		// First launch: No config.json exists on disk yet.
 		// Check if .env supplies credentials; otherwise enable Demo Mode for out-of-the-box preview.
@@ -209,6 +216,11 @@ func LoadConfig() Config {
 
 // SaveConfig writes the configuration to disk atomically and creates safety backups.
 func SaveConfig(cfg Config) error {
+	// Serialize saves to prevent concurrent write/backup collisions
+	saveMu.Lock()
+	defer saveMu.Unlock()
+
+	cfg = cfg.Clone()
 	cfg.EnsureInstances()
 	filePath := getConfigFilePath()
 	dir := filepath.Dir(filePath)
@@ -221,25 +233,46 @@ func SaveConfig(cfg Config) error {
 		return err
 	}
 
-	// 1. Safety Backup: If filePath already exists with non-empty content, back it up
+	// 1. Safety Backup (serialized): If filePath already exists with non-empty content, back it up
+	// Only backup if it's valid JSON (don't overwrite good backup with corrupt original)
 	if existing, err := os.ReadFile(filePath); err == nil && len(existing) > 0 {
-		_ = os.WriteFile(filePath+".bak", existing, 0600)
+		var existingCfg Config
+		if err := json.Unmarshal(existing, &existingCfg); err == nil {
+			// Primary is valid; back it up
+			if err := writeConfigFile(filePath+".bak", existing); err != nil {
+				return fmt.Errorf("back up configuration: %w", err)
+			}
 
-		// Create timestamped history backup (retaining last 10 revisions)
-		if !isRunningInTest() {
-			backupDir := filepath.Join(dir, "backups")
-			if err := os.MkdirAll(backupDir, 0755); err == nil {
-				timestamp := time.Now().Format("20060102-150405")
-				backupFile := filepath.Join(backupDir, fmt.Sprintf("config-%s.json", timestamp))
-				_ = os.WriteFile(backupFile, existing, 0600)
-				pruneOldBackups(backupDir, 10)
+			// Create timestamped history backup (retaining last 10 revisions)
+			if !isRunningInTest() {
+				backupDir := filepath.Join(dir, "backups")
+				if err := os.MkdirAll(backupDir, 0755); err == nil {
+					timestamp := time.Now().Format("20060102-150405")
+					backupFile := filepath.Join(backupDir, fmt.Sprintf("config-%s.json", timestamp))
+					_ = os.WriteFile(backupFile, existing, 0600)
+					pruneOldBackups(backupDir, 10)
+				}
 			}
 		}
+		// If primary is corrupt, skip backup to preserve any existing valid .bak
 	}
 
-	// 2. Atomic write: write to temp file first, then atomically rename
-	tmpPath := filePath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+	return writeConfigFile(filePath, data)
+}
+
+// writeConfigFile atomically replaces a config or backup with a private file.
+func writeConfigFile(filePath string, data []byte) error {
+	file, err := os.CreateTemp(filepath.Dir(filePath), filepath.Base(filePath)+".tmp.*")
+	if err != nil {
+		return err
+	}
+	tmpPath := file.Name()
+	defer os.Remove(tmpPath)
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
 		return err
 	}
 	return os.Rename(tmpPath, filePath)

@@ -23,6 +23,7 @@ type Client struct {
 
 // NewClient creates a new Jira client.
 func NewClient(cfg Config) *Client {
+	cfg = cfg.Clone()
 	cfg.EnsureInstances()
 	return &Client{
 		config: cfg,
@@ -37,19 +38,20 @@ func NewClient(cfg Config) *Client {
 	}
 }
 
-// UpdateConfig updates the client configuration.
+// UpdateConfig stores an independent snapshot of the client configuration.
 func (c *Client) UpdateConfig(cfg Config) {
+	cfg = cfg.Clone()
+	cfg.EnsureInstances()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	cfg.EnsureInstances()
 	c.config = cfg
 }
 
-// GetConfig returns the current configuration.
+// GetConfig returns a configuration snapshot that callers can edit independently.
 func (c *Client) GetConfig() Config {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.config
+	return c.config.Clone()
 }
 
 func authHeaderFor(email, token string) string {
@@ -161,10 +163,8 @@ func (c *Client) VerifyInstanceConnection(ctx context.Context, baseURL, email, t
 
 // FetchAssignedIssues fetches assigned tickets across all configured instances concurrently.
 func (c *Client) FetchAssignedIssues(ctx context.Context) ([]Issue, error) {
-	c.mu.RLock()
-	cfg := c.config
+	cfg := c.GetConfig()
 	debug := cfg.DebugMode
-	c.mu.RUnlock()
 
 	if cfg.DemoMode {
 		return GetMockIssues(cfg.PinnedKeys), nil

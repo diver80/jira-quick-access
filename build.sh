@@ -8,7 +8,7 @@ set -e
 APP_NAME="jira-quick-access"
 APP_DISPLAY_NAME="Jira Quick Access"
 BUNDLE_ID="com.avono.jira-quick-access"
-VERSION="${VERSION:-1.0.5}"
+VERSION="${VERSION:-1.0.6}"
 BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS="-s -w -X main.version=${VERSION} -X main.buildTime=${BUILD_TIME}"
 DIST_DIR="$(pwd)/dist"
@@ -139,7 +139,7 @@ EOF
         rm -rf "${DMG_STAGING}"
     fi
 
-    tar -czf "${DIST_DIR}/osx/JiraQuickAccess-v${VERSION}-macOS-Universal.tar.gz" -C "${STAGING_DIR}" "${APP_DISPLAY_NAME}.app"
+    COPYFILE_DISABLE=1 tar -czf "${DIST_DIR}/osx/JiraQuickAccess-v${VERSION}-macOS-Universal.tar.gz" -C "${STAGING_DIR}" "${APP_DISPLAY_NAME}.app"
     cp "${DIST_DIR}/osx/JiraQuickAccess-v${VERSION}-macOS-Universal.tar.gz" "${DIST_DIR}/osx/JiraQuickAccess-macOS-Universal.tar.gz"
 
     echo -e "${GREEN}✓ macOS build & DMG completed!${NC}"
@@ -180,9 +180,9 @@ build_lin() {
     cp "${DIST_DIR}/lin/${APP_NAME}-v${VERSION}-linux-arm64" "${DIST_DIR}/lin/${APP_NAME}-linux-arm64"
 
     cd "${DIST_DIR}/lin"
-    tar -czf "${APP_NAME}-v${VERSION}-linux-amd64.tar.gz" "${APP_NAME}-v${VERSION}-linux-amd64"
+    COPYFILE_DISABLE=1 tar -czf "${APP_NAME}-v${VERSION}-linux-amd64.tar.gz" "${APP_NAME}-v${VERSION}-linux-amd64"
     cp "${APP_NAME}-v${VERSION}-linux-amd64.tar.gz" "${APP_NAME}-linux-amd64.tar.gz"
-    tar -czf "${APP_NAME}-v${VERSION}-linux-arm64.tar.gz" "${APP_NAME}-v${VERSION}-linux-arm64"
+    COPYFILE_DISABLE=1 tar -czf "${APP_NAME}-v${VERSION}-linux-arm64.tar.gz" "${APP_NAME}-v${VERSION}-linux-arm64"
     cp "${APP_NAME}-v${VERSION}-linux-arm64.tar.gz" "${APP_NAME}-linux-arm64.tar.gz"
     cd - > /dev/null
 
