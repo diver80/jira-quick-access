@@ -137,6 +137,7 @@ EOF
             -ov -format UDZO \
             "${DMG_FILE}" >/dev/null
         rm -rf "${DMG_STAGING}"
+        cp -f "${DMG_FILE}" "${DIST_DIR}/osx/Jira.Quick.Access-v${VERSION}-macOS-Universal.dmg"
     fi
 
     COPYFILE_DISABLE=1 tar -czf "${DIST_DIR}/osx/JiraQuickAccess-v${VERSION}-macOS-Universal.tar.gz" -C "${STAGING_DIR}" "${APP_DISPLAY_NAME}.app"
@@ -223,7 +224,7 @@ print_summary() {
 }
 
 print_usage() {
-    echo "Usage: ./build.sh [target]"
+    echo "Usage: ./build.sh [target] [version]"
     echo ""
     echo "Targets:"
     echo "  all          Build for all platforms (osx, win, lin) [Default]"
@@ -232,9 +233,101 @@ print_usage() {
     echo "  dmg          Build macOS DMG drag-and-drop installer"
     echo "  win          Build for Windows (x86_64 & ARM64 .exe)"
     echo "  lin, linux   Build for Linux (x86_64 & ARM64 ELF)"
+    echo "  release      Build macOS DMG, publish GitHub release, and update Homebrew tap"
     echo "  clean        Clean previous build artifacts"
     echo "  help         Show this help message"
     echo ""
+}
+
+release_homebrew() {
+    local rel_version="${1:-$VERSION}"
+    echo -e "${CYAN}🚀 Preparing release v${rel_version} for GitHub & Homebrew Tap...${NC}"
+
+    if ! command -v gh >/dev/null 2>&1; then
+        echo -e "${RED}Error: gh (GitHub CLI) is not installed.${NC}"
+        exit 1
+    fi
+
+    if ! gh auth status >/dev/null 2>&1; then
+        echo -e "${RED}Error: gh is not authenticated. Run 'gh auth login'.${NC}"
+        exit 1
+    fi
+
+    local dmg_source="${DIST_DIR}/osx/${APP_DISPLAY_NAME}-v${rel_version}-macOS-Universal.dmg"
+    local dmg_web="${DIST_DIR}/osx/Jira.Quick.Access-v${rel_version}-macOS-Universal.dmg"
+
+    if [ ! -f "${dmg_source}" ]; then
+        VERSION="${rel_version}" build_osx
+    fi
+
+    cp -f "${dmg_source}" "${dmg_web}"
+    local sha=$(shasum -a 256 "${dmg_web}" | awk '{print $1}')
+    echo -e "   -> DMG SHA-256: ${YELLOW}${sha}${NC}"
+
+    # Push tag if needed
+    if ! git rev-parse "v${rel_version}" >/dev/null 2>&1; then
+        echo -e "   -> Tagging git commit with v${rel_version}..."
+        git tag -a "v${rel_version}" -m "Release v${rel_version}"
+    fi
+
+    echo -e "   -> Pushing tags to github and origin..."
+    git push github "v${rel_version}" || true
+    git push origin "v${rel_version}" || true
+
+    # Upload GitHub Release
+    echo -e "   -> Publishing GitHub Release v${rel_version} on diver80/jira-quick-access..."
+    gh release create "v${rel_version}" "${dmg_web}#Jira.Quick.Access-v${rel_version}-macOS-Universal.dmg" \
+        --repo diver80/jira-quick-access \
+        --title "v${rel_version}" \
+        --notes "Release v${rel_version}" 2>/dev/null || \
+    gh release upload "v${rel_version}" "${dmg_web}#Jira.Quick.Access-v${rel_version}-macOS-Universal.dmg" \
+        --repo diver80/jira-quick-access --clobber
+
+    # Update Homebrew Tap
+    echo -e "   -> Updating Homebrew tap diver80/homebrew-tap..."
+    local tap_dir="/tmp/homebrew-tap-update"
+    rm -rf "${tap_dir}"
+    gh repo clone diver80/homebrew-tap "${tap_dir}" -- --depth=1
+    
+    cat <<EOF > "${tap_dir}/Casks/jira-quick-access.rb"
+cask "jira-quick-access" do
+  version "${rel_version}"
+  sha256 "${sha}"
+
+  url "https://github.com/diver80/jira-quick-access/releases/download/v#{version}/Jira.Quick.Access-v#{version}-macOS-Universal.dmg"
+  name "Jira Quick Access"
+  desc "Fast keyboard-driven Jira navigation and search utility"
+  homepage "https://github.com/diver80/jira-quick-access"
+
+  app "Jira Quick Access.app"
+
+  zap trash: [
+    "~/.jira-quick-access.json",
+    "~/Library/Preferences/com.avono.jira-quick-access.plist",
+  ]
+
+  caveats <<~EOS
+    If macOS blocks the app on first launch (unidentified developer), run:
+      xattr -dr com.apple.quarantine "/Applications/Jira Quick Access.app"
+  EOS
+end
+EOF
+
+    cd "${tap_dir}"
+    git add Casks/jira-quick-access.rb
+    if git diff --staged --quiet; then
+        echo -e "   -> Homebrew tap Cask is already up to date."
+    else
+        git commit -m "feat: release Jira Quick Access v${rel_version}"
+        git push origin main
+        echo -e "   -> Pushed updated Cask to diver80/homebrew-tap."
+    fi
+    cd - >/dev/null
+    rm -rf "${tap_dir}"
+
+    echo -e "${GREEN}✓ Release v${rel_version} successfully published to GitHub and Homebrew tap!${NC}"
+    echo -e "   Users can install/upgrade via:"
+    echo -e "   ${CYAN}brew upgrade --cask jira-quick-access${NC}"
 }
 
 print_banner
@@ -266,6 +359,12 @@ case "$TARGET" in
         build_win
         build_lin
         print_summary
+        ;;
+    release)
+        mkdir -p "${DIST_DIR}"
+        TARGET_VERSION="${2:-$VERSION}"
+        VERSION="${TARGET_VERSION}"
+        release_homebrew "${TARGET_VERSION}"
         ;;
     clean)
         clean

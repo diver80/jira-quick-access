@@ -125,10 +125,32 @@ Generated artifacts are placed in `dist/`:
 - `dist/lin/jira-quick-access-v1.0.6-linux-{amd64,arm64}.tar.gz`
 
 ### 🍎 How to Install & Launch on macOS:
-1. **Automated (Fastest)**: Run `./build.sh install`. This copies the app into `/Applications/`, clears quarantine flags, and makes it available system-wide in Spotlight and Launchpad.
-2. **Standard macOS DMG**: After building, open `dist/osx/Jira Quick Access-v1.0.6-macOS-Universal.dmg` in Finder and drag the **Jira Quick Access** icon onto the **Applications** folder shortcut.
-3. **Launch**: Press `⌘ + Space`, type `Jira Quick Access`, and hit `Enter`.
-4. **Launch at Login (Optional)**: Open **macOS System Settings** -> **General** -> **Login Items** -> Click `+` and select `Jira Quick Access` from `/Applications`.
+
+#### Option A: Homebrew Cask (Recommended)
+Install directly via the diver80 tap:
+```bash
+brew install --cask diver80/tap/jira-quick-access
+```
+
+To upgrade to newer versions:
+```bash
+brew upgrade --cask jira-quick-access
+```
+
+> **First launch note:** If macOS blocks the app on first launch (unidentified developer), run:
+> ```bash
+> xattr -dr com.apple.quarantine "/Applications/Jira Quick Access.app"
+> ```
+
+#### Option B: Automated Local Build
+Run `./build.sh install`. This compiles Universal 2 binaries, creates the `.app` bundle, installs it directly into `/Applications/`, and clears quarantine flags.
+
+#### Option C: Standard macOS DMG Installer
+Download `Jira.Quick.Access-v1.0.6-macOS-Universal.dmg` from [GitHub Releases](https://github.com/diver80/jira-quick-access/releases), open the `.dmg` in Finder, and drag the **Jira Quick Access** icon onto the **Applications** folder shortcut.
+
+### 🚀 Launching & Autostart
+1. **Launch**: Press `⌘ + Space`, type `Jira Quick Access`, and hit `Enter`.
+2. **Launch at Login (Optional)**: Open **macOS System Settings** -> **General** -> **Login Items** -> Click `+` and select `Jira Quick Access` from `/Applications`.
 
 ---
 
