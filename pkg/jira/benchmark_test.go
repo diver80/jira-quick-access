@@ -139,7 +139,7 @@ func BenchmarkConfigSaveLoad(b *testing.B) {
 
 func BenchmarkAuthHeaderFormatting(b *testing.B) {
 	email := "frank.hess@avono.de"
-	token := "mock-api-token...very-long-jira-api-token...12345"
+	token := "mock-api-token-for-benchmark-testing-only"
 
 	b.ResetTimer()
 	b.ReportAllocs()
