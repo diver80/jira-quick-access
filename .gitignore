@@ -33,6 +33,8 @@
 /tmp/
 /scratch/
 .agents/
+tmp_*
+
 
 # Go Test coverage & binaries
 *.test
