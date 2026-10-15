@@ -25,6 +25,7 @@ static int g_isDragging = 0;
 static int g_alwaysOnTop = 1;       // 1: Always on Top (NSStatusWindowLevel), 0: Normal
 static int g_autoHide = 0;          // 1: Auto-Hide like macOS Dock, 0: Disabled
 static int g_isTucked = 0;          // 1: Window is tucked into screen edge
+static NSView *g_trackedContentView = nil; // Content view that already has our tracking area
 
 static void SetupDarwinEditMenu(void) {
     if ([NSApp mainMenu]) {
@@ -147,11 +148,17 @@ static void ApplyDarwinWindowStyles(NSWindow *window) {
 
         MakeLayersTransparent([contentView layer]);
 
-        NSTrackingArea *trackingArea = [[NSTrackingArea alloc] initWithRect:[contentView bounds]
-            options:(NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect)
-            owner:contentView
-            userInfo:nil];
-        [contentView addTrackingArea:trackingArea];
+        // Styles are re-applied on every dock; install the tracking area only once per
+        // content view, otherwise each call stacks another one and multiplies mouse events.
+        if (g_trackedContentView != contentView) {
+            NSTrackingArea *trackingArea = [[NSTrackingArea alloc] initWithRect:[contentView bounds]
+                options:(NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect)
+                owner:contentView
+                userInfo:nil];
+            [contentView addTrackingArea:trackingArea];
+            [trackingArea release];
+            g_trackedContentView = contentView;
+        }
     }
 }
 

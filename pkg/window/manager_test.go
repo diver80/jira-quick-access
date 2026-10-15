@@ -230,3 +230,11 @@ func TestCollapseCallbackInvoked(t *testing.T) {
 		t.Fatalf("expected collapseCallback to be invoked")
 	}
 }
+
+func TestOpenURLRejectsNonHTTPSchemes(t *testing.T) {
+	for _, u := range []string{"file:///Applications/Calculator.app", "javascript:alert(1)", "smb://host/share", "", "https://"} {
+		if err := OpenURL(u); err == nil {
+			t.Errorf("OpenURL(%q) should be rejected", u)
+		}
+	}
+}
