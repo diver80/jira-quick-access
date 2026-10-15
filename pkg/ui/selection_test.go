@@ -154,3 +154,62 @@ func TestStaleRefreshIsDropped(t *testing.T) {
 		t.Fatalf("stale refresh overwrote newer results with %s", view.issues[0].Key)
 	}
 }
+
+// With the queue enabled, background work must not mutate UI state until the UI
+// thread drains the queue.
+func TestUIQueueDefersBackgroundStateChanges(t *testing.T) {
+	cfg := jira.DefaultConfig()
+	cfg.DemoMode = true
+	view := NewAppView(cfg, jira.NewClient(cfg), nil)
+	defer view.Close()
+	view.EnableUIThreadQueue()
+
+	ran := make(chan struct{})
+	go view.PostToUI(func() { close(ran) })
+	time.Sleep(20 * time.Millisecond)
+	select {
+	case <-ran:
+		t.Fatal("task ran on the posting goroutine")
+	default:
+	}
+	view.RunUITasks()
+	select {
+	case <-ran:
+	default:
+		t.Fatal("RunUITasks did not run the queued task")
+	}
+}
+
+// A queued collapse must not fire if the user re-engaged with the fan meanwhile.
+func TestQueuedCollapseRechecksState(t *testing.T) {
+	cfg := jira.DefaultConfig()
+	cfg.DemoMode = true
+	view := NewAppView(cfg, jira.NewClient(cfg), nil)
+	defer view.Close()
+	view.SetState(window.StateFan)
+
+	view.mu.Lock()
+	view.lastHover = time.Now() // pointer was just inside
+	view.mu.Unlock()
+	view.collapseIdleFan()
+	if view.state != window.StateFan {
+		t.Fatal("collapsed although the pointer was recently inside")
+	}
+
+	view.mu.Lock()
+	view.lastHover = time.Now().Add(-time.Second)
+	view.searchQuery = "ops"
+	view.mu.Unlock()
+	view.collapseIdleFan()
+	if view.state != window.StateFan {
+		t.Fatal("collapsed while a search was active")
+	}
+
+	view.mu.Lock()
+	view.searchQuery = ""
+	view.mu.Unlock()
+	view.collapseIdleFan()
+	if view.state != window.StateRest {
+		t.Fatal("idle fan did not collapse")
+	}
+}

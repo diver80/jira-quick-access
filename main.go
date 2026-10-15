@@ -80,6 +80,10 @@ func main() {
 	rootView.SetVersion(version)
 	defer rootView.Close()
 
+	// Background goroutines queue state changes; run them on the event/UI thread.
+	rootView.EnableUIThreadQueue()
+	gogpuApp.OnUpdate(func(float64) { rootView.RunUITasks() })
+
 	reloadCh := make(chan struct{}, 1)
 	rootView.SetOnConfigReload(func() {
 		select {
@@ -97,8 +101,7 @@ func main() {
 	if os.Getenv("JIRA_OPEN_STATUS") == "1" {
 		go func() {
 			time.Sleep(1500 * time.Millisecond)
-			rootView.OpenStatus()
-			gogpuApp.RequestRedraw()
+			rootView.PostToUI(rootView.OpenStatus)
 		}()
 	}
 

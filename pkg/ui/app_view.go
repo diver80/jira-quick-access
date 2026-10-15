@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"jira-quick-access/pkg/jira"
@@ -97,6 +98,12 @@ type AppView struct {
 	onRedraw       func()
 	onResize       func(w, h int)
 	onConfigReload func()
+
+	// UI-thread task queue: background goroutines must not resize the window or
+	// switch states themselves (gogpu's window state is not goroutine-safe).
+	uiQueueEnabled atomic.Bool
+	uiTasksMu      sync.Mutex
+	uiTasks        []func()
 }
 
 type appViewStateSnapshot struct {
@@ -270,7 +277,7 @@ func NewAppView(
 					} else {
 						v.setHoveredTab(-1)
 						if !lastH.IsZero() && time.Since(lastH) > 300*time.Millisecond {
-							v.SetState(window.StateRest)
+							v.postToUI(v.collapseIdleFan)
 						}
 					}
 				} else if st == window.StateRest {
@@ -280,7 +287,7 @@ func NewAppView(
 						tucked := v.isTucked
 						v.mu.Unlock()
 						if autoH && tucked {
-							v.setTucked(false)
+							v.postToUI(func() { v.applyAutoTuck(false) })
 						}
 					} else {
 						v.mu.Lock()
@@ -289,7 +296,7 @@ func NewAppView(
 						tucked := v.isTucked
 						v.mu.Unlock()
 						if autoH && !tucked {
-							v.setTucked(true)
+							v.postToUI(func() { v.applyAutoTuck(true) })
 						}
 					}
 				}
@@ -316,10 +323,7 @@ func NewAppView(
 				v.mu.Unlock()
 
 				if hasToast || (showSet && activeField > 0) {
-					if v.onRedraw != nil {
-						v.onRedraw()
-					}
-					v.MarkNeedsLayout()
+					v.postToUI(v.MarkNeedsLayout)
 				}
 			}
 		}
@@ -447,6 +451,69 @@ func (v *AppView) SetAutoHide(autoHide bool) {
 	v.MarkNeedsLayout()
 	if v.onRedraw != nil {
 		v.onRedraw()
+	}
+}
+
+// EnableUIThreadQueue routes state changes from background goroutines through
+// RunUITasks. main wires RunUITasks to the render thread; without it (tests),
+// postToUI runs tasks inline.
+func (v *AppView) EnableUIThreadQueue() {
+	v.uiQueueEnabled.Store(true)
+}
+
+// postToUI schedules fn on the UI thread and requests a frame so it runs promptly.
+// It may be called with v.mu held only when the queue is enabled.
+func (v *AppView) postToUI(fn func()) {
+	if !v.uiQueueEnabled.Load() {
+		fn()
+		if v.onRedraw != nil {
+			v.onRedraw()
+		}
+		return
+	}
+	v.uiTasksMu.Lock()
+	v.uiTasks = append(v.uiTasks, fn)
+	v.uiTasksMu.Unlock()
+	if v.onRedraw != nil {
+		v.onRedraw()
+	}
+}
+
+// PostToUI schedules fn on the UI thread; safe to call from any goroutine.
+func (v *AppView) PostToUI(fn func()) {
+	v.postToUI(fn)
+}
+
+// RunUITasks runs queued tasks. Call it from the UI thread once per frame.
+func (v *AppView) RunUITasks() {
+	v.uiTasksMu.Lock()
+	tasks := v.uiTasks
+	v.uiTasks = nil
+	v.uiTasksMu.Unlock()
+	for _, fn := range tasks {
+		fn()
+	}
+}
+
+// collapseIdleFan returns to Rest if the pointer has stayed outside the fan long
+// enough. Conditions are re-checked because the user may have acted meanwhile.
+func (v *AppView) collapseIdleFan() {
+	v.mu.Lock()
+	idle := v.state == window.StateFan && !v.searchActive && v.searchQuery == "" &&
+		!v.lastHover.IsZero() && time.Since(v.lastHover) > 300*time.Millisecond
+	v.mu.Unlock()
+	if idle && !window.IsMouseInside() {
+		v.SetState(window.StateRest)
+	}
+}
+
+// applyAutoTuck tucks or untucks the resting capsule if auto-hide still applies.
+func (v *AppView) applyAutoTuck(tucked bool) {
+	v.mu.Lock()
+	applies := v.state == window.StateRest && v.autoHide
+	v.mu.Unlock()
+	if applies {
+		v.setTucked(tucked)
 	}
 }
 
@@ -702,6 +769,12 @@ func (v *AppView) SetState(newState window.WindowState) {
 
 	if newState == window.StateRest {
 		window.SetToolTip("")
+		// Leaving Rest clears isTucked without touching the native flag (that would
+		// re-dock at capsule size mid-transition); resync it now that we are back.
+		v.mu.Lock()
+		tucked := v.isTucked
+		v.mu.Unlock()
+		window.SetTucked(tucked, 36, 224)
 	}
 
 	if newState != window.StateRest {
@@ -966,9 +1039,7 @@ func (v *AppView) RefreshStatus() {
 			v.toast = NewToast(fmt.Sprintf("Status error: %v", err))
 		}
 		v.mu.Unlock()
-		if v.onRedraw != nil {
-			v.onRedraw()
-		}
+		v.postToUI(v.MarkNeedsLayout)
 	}()
 }
 
@@ -1044,11 +1115,7 @@ func (v *AppView) RefreshIssues() {
 			}
 		}
 		v.invalidateFilterCacheLocked()
-
-		if v.onRedraw != nil {
-			v.onRedraw()
-		}
-		v.MarkNeedsLayout()
+		v.postToUI(v.MarkNeedsLayout)
 	}()
 }
 
@@ -2975,7 +3042,7 @@ func (v *AppView) testConn() {
 		} else {
 			v.statusMsg = fmt.Sprintf("%s: connected as %s", nameVal, user)
 		}
-		v.MarkNeedsLayout()
+		v.postToUI(v.MarkNeedsLayout)
 	}()
 }
 

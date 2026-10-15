@@ -274,16 +274,20 @@ static void DarwinDock(int width, int height, int animate) {
     });
 }
 
+// The dock globals are read by blocks on the main queue, so they are only written
+// there as well; calls from Go threads hop onto the main queue first.
 static void DarwinSetDockPosition(int side, int screenIndex, double yRatio, int width, int height) {
-    g_dockSide = (side == 1) ? 1 : 0;
-    if (screenIndex >= 0) g_screenIndex = screenIndex;
-    if (yRatio >= 0.0 && yRatio <= 1.0) g_dockYRatio = yRatio;
-    DarwinDock(width, height, 0);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        g_dockSide = (side == 1) ? 1 : 0;
+        if (screenIndex >= 0) g_screenIndex = screenIndex;
+        if (yRatio >= 0.0 && yRatio <= 1.0) g_dockYRatio = yRatio;
+        DarwinDock(width, height, 0);
+    });
 }
 
 static void DarwinSetAlwaysOnTop(int alwaysOnTop) {
-    g_alwaysOnTop = alwaysOnTop ? 1 : 0;
     dispatch_async(dispatch_get_main_queue(), ^{
+        g_alwaysOnTop = alwaysOnTop ? 1 : 0;
         if (!g_appWindow) return;
         if (g_alwaysOnTop) {
             [g_appWindow setLevel:NSStatusWindowLevel];
@@ -296,32 +300,24 @@ static void DarwinSetAlwaysOnTop(int alwaysOnTop) {
 }
 
 static void DarwinSetAutoHide(int autoHide) {
-    g_autoHide = autoHide ? 1 : 0;
-    if (!g_autoHide && g_isTucked) {
-        g_isTucked = 0;
-        dispatch_async(dispatch_get_main_queue(), ^{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        g_autoHide = autoHide ? 1 : 0;
+        if (!g_autoHide && g_isTucked) {
+            g_isTucked = 0;
             if (g_appWindow) {
                 DarwinDock((int)[g_appWindow frame].size.width, (int)[g_appWindow frame].size.height, 1);
             }
-        });
-    }
-}
-
-static void DarwinSetTucked(int tucked, int width, int height) {
-    int shouldTuck = tucked ? 1 : 0;
-    if (g_isTucked == shouldTuck) return;
-    g_isTucked = shouldTuck;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        DarwinDock(width, height, 1);
+        }
     });
 }
 
-static int DarwinGetAlwaysOnTop(void) {
-    return g_alwaysOnTop;
-}
-
-static int DarwinGetAutoHide(void) {
-    return g_autoHide;
+static void DarwinSetTucked(int tucked, int width, int height) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        int shouldTuck = tucked ? 1 : 0;
+        if (g_isTucked == shouldTuck) return;
+        g_isTucked = shouldTuck;
+        DarwinDock(width, height, 1);
+    });
 }
 
 static void DarwinStartWindowDrag(int width, int height) {
@@ -653,6 +649,8 @@ type DarwinManager struct {
 	posYRatio     float64
 	currentWidth  int
 	currentHeight int
+	alwaysOnTop   bool // mirrors of native flags, which are only written on the main queue
+	autoHide      bool
 }
 
 func init() {
@@ -664,6 +662,7 @@ func init() {
 			posYRatio:     0.5,
 			currentWidth:  36,
 			currentHeight: 224,
+			alwaysOnTop:   true, // matches g_alwaysOnTop's initial value
 		}
 	}
 }
@@ -860,6 +859,9 @@ func (m *DarwinManager) OpenTicketURL(url string) error {
 }
 
 func (m *DarwinManager) SetAlwaysOnTop(alwaysOnTop bool) {
+	m.mu.Lock()
+	m.alwaysOnTop = alwaysOnTop
+	m.mu.Unlock()
 	val := 0
 	if alwaysOnTop {
 		val = 1
@@ -868,10 +870,15 @@ func (m *DarwinManager) SetAlwaysOnTop(alwaysOnTop bool) {
 }
 
 func (m *DarwinManager) GetAlwaysOnTop() bool {
-	return C.DarwinGetAlwaysOnTop() != 0
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.alwaysOnTop
 }
 
 func (m *DarwinManager) SetAutoHide(autoHide bool) {
+	m.mu.Lock()
+	m.autoHide = autoHide
+	m.mu.Unlock()
 	val := 0
 	if autoHide {
 		val = 1
@@ -880,7 +887,9 @@ func (m *DarwinManager) SetAutoHide(autoHide bool) {
 }
 
 func (m *DarwinManager) GetAutoHide() bool {
-	return C.DarwinGetAutoHide() != 0
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.autoHide
 }
 
 func (m *DarwinManager) SetTucked(tucked bool, width, height int) {
