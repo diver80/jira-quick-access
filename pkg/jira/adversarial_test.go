@@ -143,7 +143,7 @@ func TestEnsureInstancesEdgeCases(t *testing.T) {
 	if len(emptyCfg.Instances) != 1 {
 		t.Fatalf("expected 1 default instance, got %d", len(emptyCfg.Instances))
 	}
-	if emptyCfg.Instances[0].ID != "inst-1" || emptyCfg.Instances[0].Name != "avono" {
+	if emptyCfg.Instances[0].ID != "inst-1" || emptyCfg.Instances[0].Name != "Jira" {
 		t.Errorf("unexpected default instance: %+v", emptyCfg.Instances[0])
 	}
 	if emptyCfg.ActiveInstID != "inst-1" {

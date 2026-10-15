@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// InstanceConfig represents an individual Jira workspace instance (e.g. avono cloud, avono DC).
+// InstanceConfig represents an individual Jira workspace instance (e.g. a Cloud site and a Data Center server).
 type InstanceConfig struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
@@ -62,7 +62,7 @@ func (c Config) MaskedAPIToken() string {
 // EnsureInstances ensures at least one valid instance exists from top-level or instances list.
 func (c *Config) EnsureInstances() {
 	if len(c.Instances) == 0 {
-		name := "avono"
+		name := "Jira"
 		if c.BaseURL != "" {
 			name = "Primary"
 		}
@@ -100,41 +100,30 @@ func (c *Config) ApplyDefaults() {
 	}
 }
 
+// defaultJQL lists the current user's open tickets, newest activity first.
+const defaultJQL = "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC"
+
 // DefaultConfig returns reasonable default configuration with 5-minute polling.
+// The single instance is left blank so a fresh install carries no site or identity.
 func DefaultConfig() Config {
 	return Config{
 		Instances: []InstanceConfig{
 			{
 				ID:       "inst-1",
-				Name:     "avono cloud",
-				BaseURL:  "https://avono.atlassian.net",
-				Email:    "frank.hess@avono.de",
-				APIToken: "",
-				JQLQuery: "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC",
+				Name:     "Jira",
+				JQLQuery: defaultJQL,
 				Color:    "#38bdf8",
-			},
-			{
-				ID:       "inst-2",
-				Name:     "avono DC",
-				BaseURL:  "https://jira.avono.de",
-				Email:    "frank.hess@avono.de",
-				APIToken: "",
-				JQLQuery: "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC",
-				Color:    "#a855f7",
 			},
 		},
 		ActiveInstID:       "inst-1",
-		BaseURL:            "https://avono.atlassian.net",
-		Email:              "frank.hess@avono.de",
-		APIToken:           "",
-		JQLQuery:           "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC",
+		JQLQuery:           defaultJQL,
 		PollInterval:       300, // 5 minutes (300 seconds)
 		StatusCheckEnabled: true,
 		StatusPollInterval: 300,
 		BranchPrefix:       "feature/",
 		PinnedKeys:         []string{},
 		DemoMode:           false,
-		DebugMode:          true,
+		DebugMode:          false,
 		DockSide:           0,
 		MonitorIndex:       0,
 		PosYRatio:          0.5,

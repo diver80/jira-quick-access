@@ -4,13 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 )
 
@@ -35,14 +35,7 @@ func ResetConfigFilePathForTesting() {
 }
 
 func isRunningInTest() bool {
-	if flag.Lookup("test.v") != nil {
-		return true
-	}
-	execName := filepath.Base(os.Args[0])
-	if strings.HasSuffix(execName, ".test") || strings.Contains(execName, "test") || strings.Contains(os.Args[0], "/_test/") {
-		return true
-	}
-	return false
+	return testing.Testing()
 }
 
 func getConfigFilePath() string {
@@ -52,20 +45,20 @@ func getConfigFilePath() string {
 
 	if custom != "" {
 		dir := filepath.Dir(custom)
-		_ = os.MkdirAll(dir, 0755)
+		_ = os.MkdirAll(dir, 0700)
 		return custom
 	}
 
 	if envPath := os.Getenv("JIRA_QUICK_ACCESS_CONFIG"); envPath != "" {
 		dir := filepath.Dir(envPath)
-		_ = os.MkdirAll(dir, 0755)
+		_ = os.MkdirAll(dir, 0700)
 		return envPath
 	}
 
 	// Critical safety guard: NEVER write to user's real home directory during any test run!
 	if isRunningInTest() {
 		testDir := filepath.Join(os.TempDir(), "jira-quick-access-test")
-		_ = os.MkdirAll(testDir, 0755)
+		_ = os.MkdirAll(testDir, 0700)
 		return filepath.Join(testDir, "config.json")
 	}
 
@@ -74,7 +67,8 @@ func getConfigFilePath() string {
 		home = "."
 	}
 	dir := filepath.Join(home, ".jira-quick-access")
-	_ = os.MkdirAll(dir, 0755)
+	_ = os.MkdirAll(dir, 0700)
+	_ = os.Chmod(dir, 0700) // tighten directories created by older versions with 0755
 	return filepath.Join(dir, "config.json")
 }
 
@@ -145,6 +139,9 @@ func LoadConfig() Config {
 	if err == nil {
 		if len(saved.Instances) > 0 {
 			cfg.Instances = saved.Instances
+		} else if saved.BaseURL != "" || saved.APIToken != "" {
+			// Legacy single-instance config: let EnsureInstances migrate the top-level fields.
+			cfg.Instances = nil
 		}
 		if saved.ActiveInstID != "" {
 			cfg.ActiveInstID = saved.ActiveInstID
@@ -224,7 +221,7 @@ func SaveConfig(cfg Config) error {
 	cfg.EnsureInstances()
 	filePath := getConfigFilePath()
 	dir := filepath.Dir(filePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
 
@@ -246,7 +243,7 @@ func SaveConfig(cfg Config) error {
 			// Create timestamped history backup (retaining last 10 revisions)
 			if !isRunningInTest() {
 				backupDir := filepath.Join(dir, "backups")
-				if err := os.MkdirAll(backupDir, 0755); err == nil {
+				if err := os.MkdirAll(backupDir, 0700); err == nil {
 					timestamp := time.Now().Format("20060102-150405")
 					backupFile := filepath.Join(backupDir, fmt.Sprintf("config-%s.json", timestamp))
 					_ = os.WriteFile(backupFile, existing, 0600)
