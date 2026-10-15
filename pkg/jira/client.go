@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -25,17 +26,88 @@ type Client struct {
 func NewClient(cfg Config) *Client {
 	cfg = cfg.Clone()
 	cfg.EnsureInstances()
+	// Clone the default transport so proxy settings (HTTPS_PROXY) and dial/TLS timeouts apply.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.MaxIdleConns = 20
+	transport.MaxIdleConnsPerHost = 10
 	return &Client{
 		config: cfg,
 		httpClient: &http.Client{
-			Transport: &http.Transport{
-				MaxIdleConns:        20,
-				MaxIdleConnsPerHost: 10,
-				IdleConnTimeout:     90 * time.Second,
-			},
-			Timeout: 15 * time.Second,
+			Transport: transport,
+			Timeout:   15 * time.Second,
 		},
 	}
+}
+
+// maxResponseBytes caps how much of a Jira response body is read into memory.
+const maxResponseBytes = 8 << 20
+
+// isMissingEndpoint reports whether a status means the API variant does not exist on
+// this deployment (e.g. REST v3 on Data Center, removed search on Cloud), so the next
+// variant may be tried. Any other status is the server's real answer.
+func isMissingEndpoint(status int) bool {
+	return status == http.StatusNotFound || status == http.StatusMethodNotAllowed || status == http.StatusGone
+}
+
+// errorDetail extracts Jira's errorMessages from a response body, falling back to a
+// truncated raw body so proxy/SSO HTML pages don't flood logs and toasts.
+func errorDetail(body []byte) string {
+	var jiraErr struct {
+		ErrorMessages []string          `json:"errorMessages"`
+		Errors        map[string]string `json:"errors"`
+	}
+	if json.Unmarshal(body, &jiraErr) == nil {
+		msgs := append([]string{}, jiraErr.ErrorMessages...)
+		for field, msg := range jiraErr.Errors {
+			msgs = append(msgs, field+": "+msg)
+		}
+		if len(msgs) > 0 {
+			return strings.Join(msgs, "; ")
+		}
+	}
+	detail := strings.TrimSpace(string(body))
+	if len(detail) > 200 {
+		detail = detail[:200] + "…"
+	}
+	return detail
+}
+
+// doFirstAvailable sends the request to each endpoint in order and returns the first
+// response that is not a missing-endpoint status. Transport errors are returned
+// immediately: the request may already have reached Jira, so it is never replayed.
+func (c *Client) doFirstAvailable(ctx context.Context, method string, endpoints []string, auth string, payload []byte) (status int, body []byte, endpoint string, err error) {
+	for _, endpoint = range endpoints {
+		var reqBody io.Reader
+		if payload != nil {
+			reqBody = bytes.NewReader(payload)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, endpoint, reqBody)
+		if err != nil {
+			return 0, nil, endpoint, err
+		}
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		if payload != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return 0, nil, endpoint, err
+		}
+		body, err = io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+		_ = resp.Body.Close()
+		if err != nil {
+			return 0, nil, endpoint, err
+		}
+		if !isMissingEndpoint(resp.StatusCode) {
+			return resp.StatusCode, body, endpoint, nil
+		}
+		status = resp.StatusCode
+	}
+	return status, body, endpoint, nil
 }
 
 // UpdateConfig stores an independent snapshot of the client configuration.
@@ -114,51 +186,30 @@ func (c *Client) VerifyInstanceConnection(ctx context.Context, baseURL, email, t
 		baseURL + "/rest/api/2/myself",
 	}
 
-	var lastErr error
-	for _, endpoint := range endpoints {
-		req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
-		if err != nil {
-			return "", err
-		}
-
-		auth := authHeaderFor(email, token)
-		if auth != "" {
-			req.Header.Set("Authorization", auth)
-		}
-		req.Header.Set("Accept", "application/json")
-
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			lastErr = fmt.Errorf("connection failed: %w", err)
-			continue
-		}
-		body, _ := io.ReadAll(resp.Body)
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
-
-		if resp.StatusCode == http.StatusOK {
-			var user struct {
-				DisplayName  string `json:"displayName"`
-				EmailAddress string `json:"emailAddress"`
-				Name         string `json:"name"`
-			}
-			if err := json.Unmarshal(body, &user); err == nil {
-				name := user.DisplayName
-				if name == "" {
-					name = user.EmailAddress
-				}
-				if name == "" {
-					name = user.Name
-				}
-				return name, nil
-			}
-			return email, nil
-		}
-
-		lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	status, body, _, err := c.doFirstAvailable(ctx, http.MethodGet, endpoints, authHeaderFor(email, token), nil)
+	if err != nil {
+		return "", fmt.Errorf("connection failed: %w", err)
+	}
+	if status != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d: %s", status, errorDetail(body))
 	}
 
-	return "", lastErr
+	var user struct {
+		DisplayName  string `json:"displayName"`
+		EmailAddress string `json:"emailAddress"`
+		Name         string `json:"name"`
+	}
+	if err := json.Unmarshal(body, &user); err != nil {
+		return email, nil
+	}
+	name := user.DisplayName
+	if name == "" {
+		name = user.EmailAddress
+	}
+	if name == "" {
+		name = user.Name
+	}
+	return name, nil
 }
 
 // FetchAssignedIssues fetches assigned tickets across all configured instances concurrently.
@@ -220,70 +271,115 @@ func (c *Client) FetchAssignedIssues(ctx context.Context) ([]Issue, error) {
 	return allIssues, nil
 }
 
+const (
+	searchPageSize  = 100
+	maxSearchIssues = 1000
+)
+
+// searchEndpoints orders the search API variants for a deployment. Jira Cloud removed
+// /rest/api/{2,3}/search in favour of /rest/api/3/search/jql; Data Center only has
+// /rest/api/2/search. Unknown hosts (custom Cloud domains) fall through via 404/410.
+func searchEndpoints(baseURL string) []string {
+	jqlEndpoint := baseURL + "/rest/api/3/search/jql"
+	legacyEndpoint := baseURL + "/rest/api/2/search"
+	if u, err := url.Parse(baseURL); err == nil {
+		host := strings.ToLower(u.Hostname())
+		if strings.HasSuffix(host, ".atlassian.net") || strings.HasSuffix(host, ".jira.com") {
+			return []string{jqlEndpoint, legacyEndpoint}
+		}
+	}
+	return []string{legacyEndpoint, jqlEndpoint}
+}
+
 func (c *Client) fetchIssuesForInstance(ctx context.Context, inst InstanceConfig) ([]Issue, error) {
 	baseURL := strings.TrimRight(strings.TrimSpace(inst.BaseURL), "/")
 	email := strings.TrimSpace(inst.Email)
 	token := strings.TrimSpace(inst.APIToken)
 	jql := strings.TrimSpace(inst.JQLQuery)
 	if jql == "" {
-		jql = "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC"
+		jql = defaultJQL
 	}
+	auth := authHeaderFor(email, token)
 
 	reqBody := map[string]interface{}{
 		"jql":        jql,
-		"maxResults": 50,
+		"maxResults": searchPageSize,
 		"fields":     []string{"summary", "status", "priority", "issuetype", "updated"},
 	}
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, err
-	}
 
-	// Try standard search endpoints in order: REST API v3, REST API v2, REST API v3 JQL endpoint
-	endpoints := []string{
-		baseURL + "/rest/api/3/search",
-		baseURL + "/rest/api/2/search",
-		baseURL + "/rest/api/3/search/jql",
-	}
-
-	auth := authHeaderFor(email, token)
-
-	var lastErr error
-	for _, endpoint := range endpoints {
-		req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(bodyBytes))
+	endpoints := searchEndpoints(baseURL)
+	var issues []Issue
+	for {
+		bodyBytes, err := json.Marshal(reqBody)
 		if err != nil {
-			lastErr = err
-			continue
+			return nil, err
 		}
-
-		if auth != "" {
-			req.Header.Set("Authorization", auth)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "application/json")
-
-		resp, err := c.httpClient.Do(req)
+		status, body, endpoint, err := c.doFirstAvailable(ctx, http.MethodPost, endpoints, auth, bodyBytes)
 		if err != nil {
-			lastErr = err
-			continue
+			return nil, err
 		}
-		body, _ := io.ReadAll(resp.Body)
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
-
-		if resp.StatusCode == http.StatusOK {
-			return parseIssuesResponse(body, inst.ID, inst.Name, baseURL)
+		if status != http.StatusOK {
+			return nil, fmt.Errorf("HTTP %d on %s: %s", status, endpoint, errorDetail(body))
 		}
+		// Later pages must use the variant that answered, since pagination differs.
+		endpoints = []string{endpoint}
 
-		lastErr = fmt.Errorf("HTTP %d on %s: %s", resp.StatusCode, endpoint, string(body))
+		page, err := parseIssuesResponse(body, inst.ID, inst.Name, baseURL)
+		if err != nil {
+			return nil, err
+		}
+		issues = append(issues, page.Issues...)
+
+		if len(issues) >= maxSearchIssues {
+			log.Printf("[Jira WARN] %s: result capped at %d issues; narrow the JQL query", inst.Name, maxSearchIssues)
+			return issues[:maxSearchIssues], nil
+		}
+		if len(page.Issues) == 0 {
+			return issues, nil
+		}
+		if strings.HasSuffix(endpoint, "/search/jql") {
+			if page.IsLast || page.NextPageToken == "" {
+				return issues, nil
+			}
+			reqBody["nextPageToken"] = page.NextPageToken
+		} else {
+			next := page.StartAt + len(page.Issues)
+			if next >= page.Total {
+				return issues, nil
+			}
+			reqBody["startAt"] = next
+		}
 	}
-
-	return nil, lastErr
 }
 
-func parseIssuesResponse(data []byte, instID, instName, baseURL string) ([]Issue, error) {
+// searchPage is one page of a search response with both pagination styles:
+// token-based (/search/jql) and offset-based (/rest/api/2/search).
+type searchPage struct {
+	Issues        []Issue
+	NextPageToken string
+	IsLast        bool
+	StartAt       int
+	Total         int
+}
+
+// jiraTimeLayout is the timestamp format Jira returns (numeric zone without colon).
+const jiraTimeLayout = "2006-01-02T15:04:05.000-0700"
+
+func parseJiraTime(value string) time.Time {
+	if t, err := time.Parse(jiraTimeLayout, value); err == nil {
+		return t
+	}
+	t, _ := time.Parse(time.RFC3339, value)
+	return t
+}
+
+func parseIssuesResponse(data []byte, instID, instName, baseURL string) (searchPage, error) {
 	var searchResp struct {
-		Issues []struct {
+		NextPageToken string `json:"nextPageToken"`
+		IsLast        bool   `json:"isLast"`
+		StartAt       int    `json:"startAt"`
+		Total         int    `json:"total"`
+		Issues        []struct {
 			ID     string `json:"id"`
 			Key    string `json:"key"`
 			Fields struct {
@@ -312,13 +408,17 @@ func parseIssuesResponse(data []byte, instID, instName, baseURL string) ([]Issue
 	}
 
 	if err := json.Unmarshal(data, &searchResp); err != nil {
-		return nil, err
+		return searchPage{}, err
 	}
 
-	var issues []Issue
+	page := searchPage{
+		NextPageToken: searchResp.NextPageToken,
+		IsLast:        searchResp.IsLast,
+		StartAt:       searchResp.StartAt,
+		Total:         searchResp.Total,
+	}
 	for _, raw := range searchResp.Issues {
-		updated, _ := time.Parse(time.RFC3339, raw.Fields.Updated)
-		issues = append(issues, Issue{
+		page.Issues = append(page.Issues, Issue{
 			InstanceID:   instID,
 			InstanceName: instName,
 			BaseURL:      baseURL,
@@ -341,11 +441,11 @@ func parseIssuesResponse(data []byte, instID, instName, baseURL string) ([]Issue
 				Name:    raw.Fields.IssueType.Name,
 				Subtask: raw.Fields.IssueType.Subtask,
 			},
-			Updated: updated,
-			URL:     fmt.Sprintf("%s/browse/%s", baseURL, raw.Key),
+			Updated: parseJiraTime(raw.Fields.Updated),
+			URL:     fmt.Sprintf("%s/browse/%s", baseURL, url.PathEscape(raw.Key)),
 		})
 	}
-	return issues, nil
+	return page, nil
 }
 
 func (c *Client) resolveInstanceForIssue(issue Issue) (baseURL, email, token string) {
@@ -408,74 +508,50 @@ func (c *Client) FetchTransitions(ctx context.Context, issue Issue) ([]Transitio
 		return nil, fmt.Errorf("missing Jira Base URL for issue %s", issue.Key)
 	}
 
+	key := url.PathEscape(issue.Key)
 	endpoints := []string{
-		fmt.Sprintf("%s/rest/api/3/issue/%s/transitions", baseURL, issue.Key),
-		fmt.Sprintf("%s/rest/api/2/issue/%s/transitions", baseURL, issue.Key),
+		fmt.Sprintf("%s/rest/api/3/issue/%s/transitions", baseURL, key),
+		fmt.Sprintf("%s/rest/api/2/issue/%s/transitions", baseURL, key),
 	}
 
-	auth := authHeaderFor(email, token)
-	var lastErr error
-
-	for _, endpoint := range endpoints {
-		req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		if auth != "" {
-			req.Header.Set("Authorization", auth)
-		}
-		req.Header.Set("Accept", "application/json")
-
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		body, _ := io.ReadAll(resp.Body)
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
-
-		if resp.StatusCode == http.StatusOK {
-			var transResp struct {
-				Transitions []struct {
-					ID   string `json:"id"`
-					Name string `json:"name"`
-					To   struct {
-						ID             string `json:"id"`
-						Name           string `json:"name"`
-						StatusCategory struct {
-							Key string `json:"key"`
-						} `json:"statusCategory"`
-					} `json:"to"`
-				} `json:"transitions"`
-			}
-
-			if err := json.Unmarshal(body, &transResp); err != nil {
-				return nil, err
-			}
-
-			var transitions []Transition
-			for _, t := range transResp.Transitions {
-				transitions = append(transitions, Transition{
-					ID:   t.ID,
-					Name: t.Name,
-					To: Status{
-						ID:          t.To.ID,
-						Name:        t.To.Name,
-						CategoryKey: t.To.StatusCategory.Key,
-					},
-				})
-			}
-			return transitions, nil
-		}
-
-		lastErr = fmt.Errorf("HTTP %d on %s: %s", resp.StatusCode, endpoint, string(body))
+	status, body, endpoint, err := c.doFirstAvailable(ctx, http.MethodGet, endpoints, authHeaderFor(email, token), nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d on %s: %s", status, endpoint, errorDetail(body))
 	}
 
-	return nil, lastErr
+	var transResp struct {
+		Transitions []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+			To   struct {
+				ID             string `json:"id"`
+				Name           string `json:"name"`
+				StatusCategory struct {
+					Key string `json:"key"`
+				} `json:"statusCategory"`
+			} `json:"to"`
+		} `json:"transitions"`
+	}
+	if err := json.Unmarshal(body, &transResp); err != nil {
+		return nil, err
+	}
+
+	var transitions []Transition
+	for _, t := range transResp.Transitions {
+		transitions = append(transitions, Transition{
+			ID:   t.ID,
+			Name: t.Name,
+			To: Status{
+				ID:          t.To.ID,
+				Name:        t.To.Name,
+				CategoryKey: t.To.StatusCategory.Key,
+			},
+		})
+	}
+	return transitions, nil
 }
 
 // DoTransition executes a workflow transition routing to the issue's parent instance with REST v3 & v2 fallback.
@@ -494,9 +570,10 @@ func (c *Client) DoTransition(ctx context.Context, issue Issue, transitionID str
 		return fmt.Errorf("missing Jira Base URL for issue %s", issue.Key)
 	}
 
+	key := url.PathEscape(issue.Key)
 	endpoints := []string{
-		fmt.Sprintf("%s/rest/api/3/issue/%s/transitions", baseURL, issue.Key),
-		fmt.Sprintf("%s/rest/api/2/issue/%s/transitions", baseURL, issue.Key),
+		fmt.Sprintf("%s/rest/api/3/issue/%s/transitions", baseURL, key),
+		fmt.Sprintf("%s/rest/api/2/issue/%s/transitions", baseURL, key),
 	}
 
 	payload := map[string]interface{}{
@@ -509,40 +586,14 @@ func (c *Client) DoTransition(ctx context.Context, issue Issue, transitionID str
 		return err
 	}
 
-	auth := authHeaderFor(email, token)
-	var lastErr error
-
-	for _, endpoint := range endpoints {
-		req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(bodyBytes))
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		if auth != "" {
-			req.Header.Set("Authorization", auth)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "application/json")
-
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		body, _ := io.ReadAll(resp.Body)
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
-
-		if resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusOK {
-			return nil
-		}
-
-		lastErr = fmt.Errorf("transition failed (HTTP %d on %s): %s", resp.StatusCode, endpoint, string(body))
+	status, body, endpoint, err := c.doFirstAvailable(ctx, http.MethodPost, endpoints, authHeaderFor(email, token), bodyBytes)
+	if err != nil {
+		return fmt.Errorf("transition request failed: %w", err)
 	}
-
-	return lastErr
+	if status != http.StatusNoContent && status != http.StatusOK {
+		return fmt.Errorf("transition failed (HTTP %d on %s): %s", status, endpoint, errorDetail(body))
+	}
+	return nil
 }
 
 // ExecuteTransition is an alias for DoTransition supporting mock and live workflow execution.

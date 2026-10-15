@@ -191,13 +191,13 @@ func TestIssueModelsAndSerialization(t *testing.T) {
 
 // Tier 1: Unit Tests for Config.EnsureInstances and DefaultConfig
 func TestConfigEnsureInstances(t *testing.T) {
-	// Case 1: Empty config defaults to avono inst-1
+	// Case 1: Empty config defaults to a generic inst-1
 	var emptyCfg Config
 	emptyCfg.EnsureInstances()
 	if len(emptyCfg.Instances) != 1 {
 		t.Fatalf("expected 1 instance, got %d", len(emptyCfg.Instances))
 	}
-	if emptyCfg.Instances[0].ID != "inst-1" || emptyCfg.Instances[0].Name != "avono" {
+	if emptyCfg.Instances[0].ID != "inst-1" || emptyCfg.Instances[0].Name != "Jira" {
 		t.Errorf("unexpected instance config: %+v", emptyCfg.Instances[0])
 	}
 	if emptyCfg.ActiveInstID != "inst-1" {
@@ -236,8 +236,14 @@ func TestConfigEnsureInstances(t *testing.T) {
 
 	// Case 4: DefaultConfig sanity check
 	def := DefaultConfig()
-	if len(def.Instances) < 2 {
-		t.Errorf("expected at least 2 default instances in DefaultConfig, got %d", len(def.Instances))
+	if len(def.Instances) != 1 {
+		t.Errorf("expected exactly 1 default instance in DefaultConfig, got %d", len(def.Instances))
+	}
+	if def.Instances[0].BaseURL != "" || def.Instances[0].Email != "" || def.BaseURL != "" || def.Email != "" {
+		t.Errorf("DefaultConfig must not ship a site or identity: %+v", def)
+	}
+	if def.DebugMode {
+		t.Error("DefaultConfig must not enable debug logging")
 	}
 	if def.PollInterval != 300 {
 		t.Errorf("expected default PollInterval 300, got %d", def.PollInterval)
@@ -332,7 +338,7 @@ func TestMockHTTPMultiInstanceFetchConcurrent(t *testing.T) {
 			return
 		}
 
-		if r.URL.Path == "/rest/api/3/search" && r.Method == "POST" {
+		if r.URL.Path == "/rest/api/3/search/jql" && r.Method == "POST" {
 			body, _ := io.ReadAll(r.Body)
 			var req map[string]interface{}
 			_ = json.Unmarshal(body, &req)
