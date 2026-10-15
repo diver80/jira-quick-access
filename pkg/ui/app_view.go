@@ -28,6 +28,7 @@ type AppView struct {
 	config       jira.Config
 	client       *jira.Client
 	issues       []jira.Issue
+	refreshGen   uint64 // incremented per RefreshIssues; stale results are dropped
 	history      []jira.TransitionHistory
 	activeIdx    int
 	activeTheme  CardTheme
@@ -152,7 +153,7 @@ func NewAppView(
 	cfg = cfg.Clone()
 	cfg.ApplyDefaults()
 	cfg.EnsureInstances()
-	if cfg.Instances[0].APIToken == "" || cfg.Instances[0].Email == "" {
+	if cfg.Instances[0].APIToken == "" {
 		jira.LoadFromDotEnv(&cfg)
 	}
 
@@ -1001,6 +1002,8 @@ func (v *AppView) RefreshIssues() {
 		return
 	}
 	v.wg.Add(1)
+	v.refreshGen++
+	gen := v.refreshGen
 	v.mu.Unlock()
 
 	go func() {
@@ -1014,6 +1017,11 @@ func (v *AppView) RefreshIssues() {
 
 		v.mu.Lock()
 		defer v.mu.Unlock()
+
+		// A newer refresh (e.g. after saving new credentials) supersedes this one.
+		if gen != v.refreshGen {
+			return
+		}
 
 		if err != nil {
 			v.toast = NewToast(fmt.Sprintf("Sync error: %v", err))

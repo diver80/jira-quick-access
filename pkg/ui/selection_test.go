@@ -106,3 +106,51 @@ func TestRefreshKeepsSelectedTicket(t *testing.T) {
 		t.Fatalf("selection jumped to %s after reorder", got)
 	}
 }
+
+// A slow refresh with old credentials must not overwrite a newer, faster one.
+func TestStaleRefreshIsDropped(t *testing.T) {
+	release := make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+		fmt.Fprint(w, `{"startAt":0,"total":1,"issues":[{"id":"1","key":"OLD-1","fields":{"summary":"s"}}]}`)
+	}))
+	defer slow.Close()
+	defer close(release)
+	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"startAt":0,"total":1,"issues":[{"id":"2","key":"NEW-1","fields":{"summary":"s"}}]}`)
+	}))
+	defer fast.Close()
+
+	cfg := jira.DefaultConfig()
+	cfg.Instances = []jira.InstanceConfig{{ID: "a", BaseURL: slow.URL, Email: "a@test", APIToken: "t"}}
+	client := jira.NewClient(cfg)
+	view := NewAppView(cfg, client, nil)
+	defer view.Close()
+
+	view.RefreshIssues() // blocks on the slow server
+	time.Sleep(50 * time.Millisecond)
+	cfg.Instances[0].BaseURL = fast.URL
+	client.UpdateConfig(cfg)
+	view.RefreshIssues()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		view.mu.Lock()
+		got := len(view.issues) == 1 && view.issues[0].Key == "NEW-1"
+		view.mu.Unlock()
+		if got {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("fast refresh never applied")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	release <- struct{}{}
+	time.Sleep(100 * time.Millisecond)
+	view.mu.Lock()
+	defer view.mu.Unlock()
+	if view.issues[0].Key != "NEW-1" {
+		t.Fatalf("stale refresh overwrote newer results with %s", view.issues[0].Key)
+	}
+}
