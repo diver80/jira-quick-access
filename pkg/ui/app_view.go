@@ -29,7 +29,6 @@ type AppView struct {
 	client       *jira.Client
 	issues       []jira.Issue
 	refreshGen   uint64 // incremented per RefreshIssues; stale results are dropped
-	history      []jira.TransitionHistory
 	activeIdx    int
 	activeTheme  CardTheme
 	state        window.WindowState

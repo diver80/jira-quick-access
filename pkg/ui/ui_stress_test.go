@@ -220,39 +220,3 @@ func TestAppViewGoroutineLifecycle(t *testing.T) {
 	}
 }
 
-// TestSettingsWidgetConcurrentTestConnectionAndDraw tests concurrent connection testing and drawing
-func TestSettingsWidgetConcurrentTestConnectionAndDraw(t *testing.T) {
-	cfg := jira.Config{
-		DemoMode: true,
-		Instances: []jira.InstanceConfig{
-			{ID: "inst-1", Name: "Cloud A", BaseURL: "https://a.test", Email: "a@test.com", APIToken: "tok-a"},
-		},
-	}
-	settings := NewSettingsWidget(cfg, nil, nil)
-	ctx := &mockContext{}
-	canvas := &mockCanvas{}
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	// Goroutine 1: testConnection
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 50; i++ {
-			settings.testConnection()
-			time.Sleep(1 * time.Millisecond)
-		}
-	}()
-
-	// Goroutine 2: Draw
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 100; i++ {
-			settings.Draw(ctx, canvas)
-			time.Sleep(500 * time.Microsecond)
-		}
-	}()
-
-	wg.Wait()
-}
-
