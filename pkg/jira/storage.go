@@ -73,14 +73,16 @@ func getConfigFilePath() string {
 }
 
 // LoadFromDotEnv reads credentials from a local .env file if available.
+// A base URL is only taken together with a token from the same file, so a stray
+// .env can never redirect an already stored token to another host.
 func LoadFromDotEnv(cfg *Config) bool {
 	data, err := os.ReadFile(".env")
 	if err != nil {
 		return false
 	}
 
+	var baseURL, email, token string
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
-	loaded := false
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -88,33 +90,42 @@ func LoadFromDotEnv(cfg *Config) bool {
 		}
 
 		if strings.HasPrefix(line, "JIRA_BASE_URL=") {
-			cfg.BaseURL = strings.TrimSpace(strings.TrimPrefix(line, "JIRA_BASE_URL="))
-			loaded = true
+			baseURL = strings.TrimSpace(strings.TrimPrefix(line, "JIRA_BASE_URL="))
 		} else if strings.HasPrefix(line, "JIRA_EMAIL=") {
-			cfg.Email = strings.TrimSpace(strings.TrimPrefix(line, "JIRA_EMAIL="))
-			loaded = true
+			email = strings.TrimSpace(strings.TrimPrefix(line, "JIRA_EMAIL="))
 		} else if strings.HasPrefix(line, "JIRA_API_TOKEN=") {
-			cfg.APIToken = strings.TrimSpace(strings.TrimPrefix(line, "JIRA_API_TOKEN="))
-			loaded = true
-		} else if strings.HasPrefix(line, "ATATT") {
-			cfg.APIToken = line
-			loaded = true
+			token = strings.TrimSpace(strings.TrimPrefix(line, "JIRA_API_TOKEN="))
+		} else if strings.HasPrefix(line, "ATATT") && !strings.ContainsAny(line, "= ") {
+			token = line
 		}
+	}
+	if token == "" {
+		return false
 	}
 
+	cfg.BaseURL, cfg.APIToken = firstNonEmpty(baseURL, cfg.BaseURL), token
+	if email != "" {
+		cfg.Email = email
+	}
 	cfg.EnsureInstances()
-	if loaded && len(cfg.Instances) > 0 {
-		if cfg.BaseURL != "" {
-			cfg.Instances[0].BaseURL = cfg.BaseURL
-		}
-		if cfg.Email != "" {
-			cfg.Instances[0].Email = cfg.Email
-		}
-		if cfg.APIToken != "" {
-			cfg.Instances[0].APIToken = cfg.APIToken
+	inst := &cfg.Instances[0]
+	if baseURL != "" {
+		inst.BaseURL = baseURL
+	}
+	if email != "" {
+		inst.Email = email
+	}
+	inst.APIToken = token
+	return true
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
 		}
 	}
-	return loaded
+	return ""
 }
 
 // LoadConfig loads configuration from disk, returning defaults if not found.
@@ -203,8 +214,8 @@ func LoadConfig() Config {
 
 	cfg.EnsureInstances()
 
-	// If APIToken is empty, try loading from .env
-	if cfg.Instances[0].APIToken == "" || cfg.Instances[0].Email == "" {
+	// Without a stored token, fall back to a developer .env in the working directory.
+	if cfg.Instances[0].APIToken == "" {
 		LoadFromDotEnv(&cfg)
 	}
 

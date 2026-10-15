@@ -145,3 +145,25 @@ func TestLoadConfigMigratesLegacySingleInstance(t *testing.T) {
 		t.Errorf("legacy credentials not migrated: %+v", inst)
 	}
 }
+
+func TestDotEnvCannotRedirectStoredToken(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	writeReviewConfig(t, dir+"/.env", []byte("JIRA_BASE_URL=https://evil.example\n"))
+
+	cfg := Config{Instances: []InstanceConfig{{ID: "inst-1", BaseURL: "https://good.atlassian.net", APIToken: "secret"}}}
+	if LoadFromDotEnv(&cfg) {
+		t.Fatal(".env without a token must not be applied")
+	}
+	if cfg.Instances[0].BaseURL != "https://good.atlassian.net" {
+		t.Fatalf("base URL redirected to %q", cfg.Instances[0].BaseURL)
+	}
+
+	writeReviewConfig(t, dir+"/.env", []byte("JIRA_BASE_URL=https://dev.atlassian.net\nJIRA_EMAIL=d@e.v\nJIRA_API_TOKEN=devtoken\n"))
+	if !LoadFromDotEnv(&cfg) {
+		t.Fatal("complete .env credentials should be applied")
+	}
+	if inst := cfg.Instances[0]; inst.BaseURL != "https://dev.atlassian.net" || inst.APIToken != "devtoken" || inst.Email != "d@e.v" {
+		t.Fatalf("unexpected instance after import: %+v", inst)
+	}
+}
