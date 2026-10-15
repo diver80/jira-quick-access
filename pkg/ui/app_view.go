@@ -978,6 +978,22 @@ func (v *AppView) SetOnConfigReload(cb func()) {
 	v.mu.Unlock()
 }
 
+// sameIssue reports whether two issues are the same ticket. Keys alone are not unique:
+// two Jira sites can both have e.g. OPS-12.
+func sameIssue(a, b jira.Issue) bool {
+	return a.Key == b.Key && a.InstanceID == b.InstanceID
+}
+
+// indexOfIssue returns the position of target in issues, or -1.
+func indexOfIssue(issues []jira.Issue, target jira.Issue) int {
+	for i, iss := range issues {
+		if sameIssue(iss, target) {
+			return i
+		}
+	}
+	return -1
+}
+
 func (v *AppView) RefreshIssues() {
 	v.mu.Lock()
 	if v.ctx == nil || v.ctx.Err() != nil {
@@ -1002,10 +1018,20 @@ func (v *AppView) RefreshIssues() {
 		if err != nil {
 			v.toast = NewToast(fmt.Sprintf("Sync error: %v", err))
 		} else {
-			v.issues = issues
-			if v.activeIdx >= len(issues) {
-				v.activeIdx = 0
+			// Jira reorders results (e.g. ORDER BY updated), so keep the selection on the
+			// same ticket rather than the same list position.
+			var prevActive *jira.Issue
+			if v.activeIdx >= 0 && v.activeIdx < len(v.issues) {
+				prevActive = &v.issues[v.activeIdx]
 			}
+			newIdx := 0
+			if prevActive != nil {
+				if idx := indexOfIssue(issues, *prevActive); idx >= 0 {
+					newIdx = idx
+				}
+			}
+			v.issues = issues
+			v.activeIdx = newIdx
 			if len(issues) > 0 {
 				v.activeTheme = GetTicketTheme(v.activeIdx)
 			}
@@ -1564,9 +1590,9 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	tabHeight := float32(64)
 	tabGap := float32(7)
 
-	var activeKey string
+	var activeIss *jira.Issue
 	if s.activeIdx >= 0 && s.activeIdx < len(s.issues) {
-		activeKey = s.issues[s.activeIdx].Key
+		activeIss = &s.issues[s.activeIdx]
 	}
 
 	if !s.showStatus {
@@ -1579,7 +1605,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			}
 
 			tabTheme := GetTicketTheme(i)
-			isActive := (iss.Key == activeKey && !s.showSettings)
+			isActive := activeIss != nil && sameIssue(iss, *activeIss) && !s.showSettings
 			isHovered := (i == s.hoveredTabIdx)
 			tabWidth := tabBarWidth - 14
 			tabX := tabStartX + 2
@@ -2328,13 +2354,9 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 			tabY := tabStartY + float32(i)*(tabHeight+tabGap)
 			tabRect := geometry.NewRect(b.Min.X+7, tabY, w-14, tabHeight)
 			if tabRect.Contains(pos) && tabVisibleRect.Contains(pos) {
-				for origIdx, oIss := range allIssues {
-					if oIss.Key == fIss.Key {
-						v.Expand(origIdx)
-						return true
-					}
+				if origIdx := indexOfIssue(allIssues, fIss); origIdx >= 0 {
+					v.Expand(origIdx)
 				}
-				v.Expand(i)
 				return true
 			}
 		}
@@ -2407,17 +2429,15 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 			tabY := tabStartY + float32(i)*(tabHeight+tabGap)
 			tabRect := geometry.NewRect(tabStartX, tabY, tabBarWidth-4, tabHeight)
 			if tabRect.Contains(pos) && tabVisibleRect.Contains(pos) {
-				for origIdx, oIss := range allIssues {
-					if oIss.Key == iss.Key {
-						if activeIdx == origIdx && !showSettings && !showStatus {
-							v.SetState(window.StateFan)
-							return true
-						}
-						v.Expand(origIdx)
-						return true
-					}
+				origIdx := indexOfIssue(allIssues, iss)
+				if origIdx < 0 {
+					return true
 				}
-				v.Expand(i)
+				if activeIdx == origIdx && !showSettings && !showStatus {
+					v.SetState(window.StateFan)
+					return true
+				}
+				v.Expand(origIdx)
 				return true
 			}
 		}
@@ -2585,82 +2605,35 @@ func (v *AppView) handleKey(ev *event.KeyEvent) bool {
 	if !showSettings && !showStatus && (st == window.StateFan || st == window.StateExpanded) {
 		filtered := v.getFilteredIssues()
 
-		// Arrow Up navigation
-		if ev.Key == event.KeyUp {
-			if len(filtered) > 0 {
-				v.mu.Lock()
-				curKey := ""
-				if v.activeIdx >= 0 && v.activeIdx < len(v.issues) {
-					curKey = v.issues[v.activeIdx].Key
-				}
-				curFIdx := 0
-				for fi, iss := range filtered {
-					if iss.Key == curKey {
-						curFIdx = fi
-						break
-					}
-				}
-				newFIdx := curFIdx - 1
-				if newFIdx < 0 {
-					newFIdx = len(filtered) - 1
-				}
-				newKey := filtered[newFIdx].Key
-				for origI, iss := range v.issues {
-					if iss.Key == newKey {
-						v.activeIdx = origI
-						v.activeTheme = GetTicketTheme(origI)
-						break
-					}
-				}
-				v.mu.Unlock()
-				if st == window.StateExpanded {
-					v.loadActiveTicketInMobileView()
-				}
-				v.MarkNeedsLayout()
-				if v.onRedraw != nil {
-					v.onRedraw()
-				}
-				return true
+		// Arrow Up/Down navigation
+		if (ev.Key == event.KeyUp || ev.Key == event.KeyDown) && len(filtered) > 0 {
+			delta := 1
+			if ev.Key == event.KeyUp {
+				delta = -1
 			}
+			v.mu.Lock()
+			curFIdx := 0
+			if v.activeIdx >= 0 && v.activeIdx < len(v.issues) {
+				if fi := indexOfIssue(filtered, v.issues[v.activeIdx]); fi >= 0 {
+					curFIdx = fi
+				}
+			}
+			newFIdx := (curFIdx + delta + len(filtered)) % len(filtered)
+			if origI := indexOfIssue(v.issues, filtered[newFIdx]); origI >= 0 {
+				v.activeIdx = origI
+				v.activeTheme = GetTicketTheme(origI)
+			}
+			v.mu.Unlock()
+			if st == window.StateExpanded {
+				v.loadActiveTicketInMobileView()
+			}
+			v.MarkNeedsLayout()
+			if v.onRedraw != nil {
+				v.onRedraw()
+			}
+			return true
 		}
 
-		// Arrow Down navigation
-		if ev.Key == event.KeyDown {
-			if len(filtered) > 0 {
-				v.mu.Lock()
-				curKey := ""
-				if v.activeIdx >= 0 && v.activeIdx < len(v.issues) {
-					curKey = v.issues[v.activeIdx].Key
-				}
-				curFIdx := 0
-				for fi, iss := range filtered {
-					if iss.Key == curKey {
-						curFIdx = fi
-						break
-					}
-				}
-				newFIdx := (curFIdx + 1) % len(filtered)
-				newKey := filtered[newFIdx].Key
-				for origI, iss := range v.issues {
-					if iss.Key == newKey {
-						v.activeIdx = origI
-						v.activeTheme = GetTicketTheme(origI)
-						break
-					}
-				}
-				v.mu.Unlock()
-				if st == window.StateExpanded {
-					v.loadActiveTicketInMobileView()
-				}
-				v.MarkNeedsLayout()
-				if v.onRedraw != nil {
-					v.onRedraw()
-				}
-				return true
-			}
-		}
-
-		// Cmd+O: Open active ticket in browser
 		if isCmdOrCtrl && (ev.Key == event.KeyO || ev.Rune == 'o' || ev.Rune == 'O') {
 			v.mu.Lock()
 			var targetURL string
