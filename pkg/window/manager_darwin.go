@@ -425,16 +425,24 @@ static int DarwinIsMouseInsideWindow(void) {
     return NSPointInRect(mouseLoc, hitFrame) ? 1 : 0;
 }
 
+// Wrapped in an IIFE so no globals leak into Jira's page, and the style element is
+// tagged so re-running the script (on every panel show) does not stack copies.
 static NSString *const kHideJiraHeaderScript =
+    @"(function() { if (document.getElementById('jqa-hide-header')) return; "
     @"var css = 'header, #ak-jira-navigation, nav[aria-label=\"Global\"], "
     @"[data-testid=\"GlobalNavigation\"], [data-test-id=\"global-pages.header\"], "
     @"[data-testid=\"navigation-apps-sidebar\"], [data-testid=\"app-navigation\"], "
     @"[data-testid=\"NavigationHeader\"] { display: none !important; } "
     @"body, #ak-main-content, #jira-frontend, #content { margin-top: 0 !important; padding-top: 0 !important; }'; "
     @"var style = document.createElement('style'); "
-    @"style.type = 'text/css'; "
+    @"style.id = 'jqa-hide-header'; "
     @"style.appendChild(document.createTextNode(css)); "
-    @"(document.head || document.documentElement).appendChild(style);";
+    @"(document.head || document.documentElement).appendChild(style); })();";
+
+// Implemented in webview_delegate_darwin.m (an Objective-C class cannot live in a
+// cgo preamble of a file with //export: the preamble is compiled twice).
+extern void JQAInstallWebViewDelegate(WKWebView *webView);
+extern void JQAAllowHostInPanel(NSString *host);
 
 static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -465,6 +473,10 @@ static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
                     config.userContentController = userContent;
 
                     g_ticketWebView = [[WKWebView alloc] initWithFrame:NSMakeRect(cardX, 8, cardW, cardH) configuration:config];
+                    [script release];
+                    [userContent release];
+                    [config release];
+                    JQAInstallWebViewDelegate(g_ticketWebView);
                     [g_ticketWebView setWantsLayer:YES];
                     [g_ticketWebView.layer setCornerRadius:14.0];
                     [g_ticketWebView.layer setMasksToBounds:YES];
@@ -539,6 +551,7 @@ static void DarwinLoadMobileTicketView(const char *urlStr) {
         if (!g_ticketWebView) return;
         NSURL *url = [NSURL URLWithString:nsStr];
         if (url) {
+            JQAAllowHostInPanel([url host]);
             NSURLRequest *req = [NSURLRequest requestWithURL:url];
             [g_ticketWebView loadRequest:req];
         }
