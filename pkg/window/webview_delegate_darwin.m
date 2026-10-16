@@ -68,3 +68,14 @@ void JQAAllowHostInPanel(NSString *host) {
     if (!g_allowedHosts) g_allowedHosts = [[NSMutableSet alloc] init];
     [g_allowedHosts addObject:[host lowercaseString]];
 }
+
+// "Open in browser" HUD button: the page the user is looking at (they may have
+// followed links inside the panel), or the ticket it was opened with.
+void JQAOpenPanelPageExternally(WKWebView *webView, NSURL *fallback) {
+    NSURL *url = webView.URL;
+    NSString *scheme = [[url scheme] lowercaseString];
+    if (!([scheme isEqualToString:@"http"] || [scheme isEqualToString:@"https"])) {
+        url = fallback;
+    }
+    if (url != nil) JQAOpenExternally(url);
+}
