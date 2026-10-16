@@ -107,6 +107,10 @@ static void SetupDarwinEditMenu(void) {
 
 static void MakeLayersTransparent(CALayer *layer) {
     if (!layer) return;
+    // The ticket panel and its HUD buttons have their own backgrounds; clearing them
+    // on every dock leaves white-on-white buttons over the Jira page.
+    id owner = layer.delegate;
+    if (owner != nil && (owner == g_ticketWebView || owner == g_closeButton || owner == g_externalButton)) return;
     layer.opaque = NO;
     layer.backgroundColor = [[NSColor clearColor] CGColor];
     for (CALayer *sub in layer.sublayers) {
