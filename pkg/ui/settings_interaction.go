@@ -50,6 +50,9 @@ func (v *AppView) handleSettingsClick(r geometry.Rect, pos geometry.Point) bool 
 	case l.systemTab.Contains(pos), hasUpdate && l.updateBadge.Contains(pos):
 		v.switchSettingsSection(settingsSystem)
 		return true
+	case l.shortcutsTab.Contains(pos):
+		v.switchSettingsSection(settingsShortcuts)
+		return true
 	case l.close.Contains(pos):
 		v.CloseSettings()
 		return true
@@ -61,6 +64,9 @@ func (v *AppView) handleSettingsClick(r geometry.Rect, pos geometry.Point) bool 
 	if section == settingsSystem {
 		v.handleSystemSettingsClick(l, pos, hasUpdate)
 		return true
+	}
+	if section == settingsShortcuts {
+		return true // read-only overview
 	}
 
 	if section == settingsInstances {

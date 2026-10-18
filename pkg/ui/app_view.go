@@ -2659,7 +2659,10 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 }
 
 func (v *AppView) handleKey(ev *event.KeyEvent) bool {
-	if ev.Key == event.KeyEscape {
+	// Cmd+W closes like Escape.
+	cmdW := (ev.Modifiers().Has(event.ModSuper) || ev.Modifiers().Has(event.ModCtrl)) &&
+		(ev.Key == event.KeyW || ev.Rune == 'w' || ev.Rune == 'W')
+	if ev.Key == event.KeyEscape || cmdW {
 		v.mu.Lock()
 		st := v.state
 		searchQ := v.searchQuery
@@ -2849,7 +2852,7 @@ func (v *AppView) handleKey(ev *event.KeyEvent) bool {
 	// when no field is focused after switching sections.
 	if showSettings && !isCmdOrCtrl && (ev.Key == event.KeyTab || ev.Key == event.KeyEnter) {
 		v.mu.Lock()
-		if v.settingsSection == settingsSystem {
+		if v.settingsSection == settingsSystem || v.settingsSection == settingsShortcuts {
 			v.mu.Unlock() // no text fields on this page
 			return true
 		}

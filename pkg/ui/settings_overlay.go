@@ -54,12 +54,15 @@ func (v *AppView) drawSettingsOverlay(ctx widget.Context, canvas widget.Canvas, 
 	settingsButton(canvas, l.instancesTab, "Jira instances", s.settingsSection == settingsInstances)
 	settingsButton(canvas, l.applicationTab, "Application", s.settingsSection == settingsApplication)
 	settingsButton(canvas, l.systemTab, "System", s.settingsSection == settingsSystem)
+	settingsButton(canvas, l.shortcutsTab, "Shortcuts", s.settingsSection == settingsShortcuts)
 
 	switch s.settingsSection {
 	case settingsApplication:
 		v.drawApplicationSettings(canvas, l, s)
 	case settingsSystem:
 		v.drawSystemSettings(canvas, l, s)
+	case settingsShortcuts:
+		drawShortcutSettings(canvas, l, s)
 	default:
 		v.drawInstanceSettings(canvas, l, s)
 	}

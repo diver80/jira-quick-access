@@ -67,7 +67,7 @@ Global real-time incident telemetry and service health monitoring across 8 core 
 - Cycle through active instances with a single click on the header pill in Fan mode.
 
 ### ⌨️ Native Shortcuts & Copy-Paste Support
-Standard macOS clipboard shortcuts dispatch natively throughout embedded WebViews and input fields:
+Standard macOS clipboard shortcuts dispatch natively throughout embedded WebViews and input fields. **Settings → Shortcuts** lists all app shortcuts.
 
 | Shortcut | Action |
 |---|---|
@@ -76,12 +76,16 @@ Standard macOS clipboard shortcuts dispatch natively throughout embedded WebView
 | `⌘A` | Select all |
 | `⌘Z` | Undo |
 | `⌥⌘J` | Global hotkey: open the ticket list with search focused from any app (press again to close) |
+| `↑` / `↓` | Select the previous / next ticket |
+| `⌘K` / `⌘F` | Focus the ticket search |
+| `⌘R` | Refresh tickets now |
 | `⌘B` | Open or close the board |
 | `⌘O` | Open the selected ticket in the browser |
+| `⌘C` | Copy the selected ticket key (outside text fields) |
 | `⌘⇧C` | Copy a Git branch name for the selected ticket (`feature/OPS-12-fix-login-timeout`) |
-| `Esc` / `⌘W` | Close expanded ticket view back to tabs, or collapse Fan deck to Rest capsule |
+| `Esc` / `⌘W` | Clear the search, close the ticket view, board or settings, or collapse the Fan deck to the Rest capsule |
 | `Backspace` | Erase instant search query in Fan mode |
-| `Tab` / `Enter` | Cycle next field in Settings overlay |
+| `Tab` / `⇧Tab` / `Enter` | Next / previous field in the Settings overlay |
 
 ### 🧰 Ticket Panel, Notifications & Updates
 - **Ticket header**: The panel shows the ticket key and summary with **Copy key**, **Copy link**, **Copy branch** and **Open ↗** (browser) actions.

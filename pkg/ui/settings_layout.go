@@ -8,6 +8,7 @@ const (
 	settingsInstances settingsSection = iota
 	settingsApplication
 	settingsSystem
+	settingsShortcuts
 )
 
 // sortModes lists the ticket orders offered on the system page, in button order.
@@ -35,7 +36,7 @@ type settingsLayout struct {
 	statusEnabled, demoMode, debugMode            geometry.Rect
 	intervalPresets                               [3]geometry.Rect
 
-	systemTab, updateBadge                     geometry.Rect
+	systemTab, shortcutsTab, updateBadge       geometry.Rect
 	launchAtLogin, globalHotKey, notifications geometry.Rect
 	sortButtons                                [4]geometry.Rect
 	updateCheck, checkNow, openRelease         geometry.Rect
@@ -48,9 +49,10 @@ func newSettingsLayout(r geometry.Rect, instanceCount, selectedInstance, monitor
 	w := r.Width()
 	l := settingsLayout{
 		bounds:       r,
-		instancesTab: rect(20, 48, 154, 30), applicationTab: rect(180, 48, 154, 30), systemTab: rect(340, 48, 154, 30),
-		updateBadge: rect(178, 18, 132, 19),
-		close:       rect(w-76, 14, 56, 26), save: rect(w-156, r.Height()-40, 136, 28),
+		instancesTab: rect(20, 48, 148, 30), applicationTab: rect(176, 48, 148, 30), systemTab: rect(332, 48, 148, 30),
+		shortcutsTab: rect(488, 48, 148, 30),
+		updateBadge:  rect(178, 18, 132, 19),
+		close:        rect(w-76, 14, 56, 26), save: rect(w-156, r.Height()-40, 136, 28),
 		importEnv: rect(32, 460, 94, 28), testConnection: rect(134, 460, 134, 28),
 		deleteInstance: rect(w-158, 460, 126, 28), addInstance: rect(w-112, 144, 80, 26),
 		leftEdge: rect(32, 178, 95, 26), rightEdge: rect(135, 178, 95, 26),
@@ -115,7 +117,7 @@ func (l settingsLayout) visibleFields(section settingsSection) []int {
 	switch section {
 	case settingsApplication:
 		return []int{6, 7}
-	case settingsSystem:
+	case settingsSystem, settingsShortcuts:
 		return nil
 	}
 	return []int{1, 2, 3, 4, 5}
