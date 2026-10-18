@@ -27,25 +27,37 @@ func (ic InstanceConfig) MaskedAPIToken() string {
 
 // Config holds multi-instance Jira settings and global application preferences.
 type Config struct {
-	Instances    []InstanceConfig `json:"instances"`
-	ActiveInstID string           `json:"active_instance_id"`
-	BaseURL      string           `json:"base_url"`      // Backward-compatibility primary
-	Email        string           `json:"email"`         // Backward-compatibility primary
-	APIToken     string           `json:"api_token"`     // Backward-compatibility primary
-	JQLQuery     string           `json:"jql_query"`     // Backward-compatibility primary
-	PollInterval       int              `json:"poll_interval"`         // Sync frequency in seconds (default: 300 / 5 min)
+	Instances          []InstanceConfig `json:"instances"`
+	ActiveInstID       string           `json:"active_instance_id"`
+	BaseURL            string           `json:"base_url"`             // Backward-compatibility primary
+	Email              string           `json:"email"`                // Backward-compatibility primary
+	APIToken           string           `json:"api_token"`            // Backward-compatibility primary
+	JQLQuery           string           `json:"jql_query"`            // Backward-compatibility primary
+	PollInterval       int              `json:"poll_interval"`        // Sync frequency in seconds (default: 300 / 5 min)
 	StatusCheckEnabled bool             `json:"status_check_enabled"` // Atlassian status checking (default: true)
 	StatusPollInterval int              `json:"status_poll_interval"` // Status check frequency in seconds (default: 300)
-	BranchPrefix       string           `json:"branch_prefix"`         // Git branch prefix (e.g., "feature/")
-	PinnedKeys   []string         `json:"pinned_keys"`   // Pinned issue keys
-	DemoMode     bool             `json:"demo_mode"`     // Mock / demo workflow without live Jira (default: false)
-	DebugMode    bool             `json:"debug_mode"`    // Verbose logging of API requests & auth headers
-	DockSide     int              `json:"dock_side"`     // 0: Right Edge, 1: Left Edge
-	MonitorIndex int              `json:"monitor_index"` // Display index (0..N-1)
-	PosYRatio    float64          `json:"pos_y_ratio"`   // Vertical anchor position ratio (0.0..1.0, default 0.5)
-	AlwaysOnTop  bool             `json:"always_on_top"` // Float HUD window above all regular windows (default: true)
-	AutoHide     bool             `json:"auto_hide"`     // macOS Dock-style auto-hide when resting (default: false)
+	BranchPrefix       string           `json:"branch_prefix"`        // Git branch prefix (e.g., "feature/")
+	PinnedKeys         []string         `json:"pinned_keys"`          // Pinned issue keys
+	DemoMode           bool             `json:"demo_mode"`            // Mock / demo workflow without live Jira (default: false)
+	DebugMode          bool             `json:"debug_mode"`           // Verbose logging of API requests & auth headers
+	DockSide           int              `json:"dock_side"`            // 0: Right Edge, 1: Left Edge
+	MonitorIndex       int              `json:"monitor_index"`        // Display index (0..N-1)
+	PosYRatio          float64          `json:"pos_y_ratio"`          // Vertical anchor position ratio (0.0..1.0, default 0.5)
+	AlwaysOnTop        bool             `json:"always_on_top"`        // Float HUD window above all regular windows (default: true)
+	AutoHide           bool             `json:"auto_hide"`            // macOS Dock-style auto-hide when resting (default: false)
+	GlobalHotKey       bool             `json:"global_hotkey"`        // ⌥⌘J opens the ticket list from anywhere (default: true)
+	Notifications      bool             `json:"notifications"`        // Notify about new tickets and status changes (default: true)
+	UpdateCheck        bool             `json:"update_check"`         // Look for new releases on GitHub once a day (default: true)
+	SortMode           string           `json:"sort_mode,omitempty"`  // Ticket order: "" (Jira), "updated", "priority" or "status"
 }
+
+// Ticket orders offered in the settings; the empty mode keeps Jira's own order.
+const (
+	SortJira     = ""
+	SortUpdated  = "updated"
+	SortPriority = "priority"
+	SortStatus   = "status"
+)
 
 // MaskedAPIToken returns a masked representation of the active/primary API token.
 func (c Config) MaskedAPIToken() string {
@@ -129,6 +141,9 @@ func DefaultConfig() Config {
 		PosYRatio:          0.5,
 		AlwaysOnTop:        true,
 		AutoHide:           false,
+		GlobalHotKey:       true,
+		Notifications:      true,
+		UpdateCheck:        true,
 	}
 }
 

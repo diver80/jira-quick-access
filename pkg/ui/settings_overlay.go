@@ -46,14 +46,21 @@ func (v *AppView) drawSettingsOverlay(ctx widget.Context, canvas widget.Canvas, 
 		canvas.DrawRoundRect(badge, widget.RGBA8(35, 47, 66, 255), 4)
 		canvas.DrawText("v"+s.version, badge, 10, widget.RGBA8(150, 188, 232, 255), false, widget.TextAlignCenter)
 	}
+	if s.update.Version != "" {
+		canvas.DrawRoundRect(l.updateBadge, widget.RGBA8(96, 165, 250, 255), 4)
+		canvas.DrawText("Update "+s.update.Version+" available", l.updateBadge, 10, widget.RGBA8(13, 24, 42, 255), true, widget.TextAlignCenter)
+	}
 	settingsButton(canvas, l.close, "Close", false)
 	settingsButton(canvas, l.instancesTab, "Jira instances", s.settingsSection == settingsInstances)
 	settingsButton(canvas, l.applicationTab, "Application", s.settingsSection == settingsApplication)
-	settingsText(canvas, rect(350, 56, r.Width()-380, 16), "Connections and app preferences", 10, false)
+	settingsButton(canvas, l.systemTab, "System", s.settingsSection == settingsSystem)
 
-	if s.settingsSection == settingsApplication {
+	switch s.settingsSection {
+	case settingsApplication:
 		v.drawApplicationSettings(canvas, l, s)
-	} else {
+	case settingsSystem:
+		v.drawSystemSettings(canvas, l, s)
+	default:
 		v.drawInstanceSettings(canvas, l, s)
 	}
 
@@ -215,4 +222,56 @@ func (v *AppView) drawApplicationSettings(canvas widget.Canvas, l settingsLayout
 	}
 	settingsButton(canvas, l.debugMode, debug, s.debugMode)
 	settingsText(canvas, rect(346, 462, r.Width()-378, 14), "Use Save all settings to apply", 10, false)
+}
+
+func onOff(label string, on bool) string {
+	if on {
+		return label + ": On"
+	}
+	return label + ": Off"
+}
+
+func (v *AppView) drawSystemSettings(canvas widget.Canvas, l settingsLayout, s appViewStateSnapshot) {
+	r := l.bounds
+	rect := func(x, y, w, h float32) geometry.Rect { return geometry.NewRect(r.Min.X+x, r.Min.Y+y, w, h) }
+
+	settingsCard(canvas, rect(20, 92, r.Width()-40, 90))
+	settingsText(canvas, rect(32, 102, 250, 16), "Startup & shortcut", 12, true)
+	settingsText(canvas, rect(r.Width()-222, 104, 190, 14), "Applies and saves immediately", 10, false)
+	login := "Launch at login: Off"
+	switch s.loginItem {
+	case window.LoginItemEnabled:
+		login = "Launch at login: On"
+	case window.LoginItemNeedsApproval:
+		login = "Launch at login: Approve"
+	case window.LoginItemUnsupported:
+		login = "Launch at login: n/a"
+	}
+	settingsButton(canvas, l.launchAtLogin, login, s.loginItem == window.LoginItemEnabled)
+	settingsButton(canvas, l.globalHotKey, onOff("Hotkey ⌥⌘J", s.config.GlobalHotKey), s.config.GlobalHotKey)
+	settingsText(canvas, rect(32, 160, r.Width()-64, 14), "⌥⌘J opens the ticket list with search from any app; press it again to close.", 10, false)
+
+	settingsCard(canvas, rect(20, 194, r.Width()-40, 84))
+	settingsText(canvas, rect(32, 204, 250, 16), "Notifications", 12, true)
+	settingsButton(canvas, l.notifications, onOff("Notifications", s.config.Notifications), s.config.Notifications)
+	settingsText(canvas, rect(244, 236, r.Width()-276, 14), "New tickets and status changes after each refresh", 10, false)
+	settingsText(canvas, rect(32, 260, r.Width()-64, 14), "Changes to tickets you opened in the last 15 minutes are not announced.", 10, false)
+
+	settingsCard(canvas, rect(20, 290, r.Width()-40, 84))
+	settingsText(canvas, rect(32, 298, 250, 16), "Ticket order", 12, true)
+	for i, m := range sortModes {
+		settingsButton(canvas, l.sortButtons[i], m.label, s.config.SortMode == m.mode)
+	}
+	settingsText(canvas, rect(32, 352, r.Width()-64, 14), "Jira order keeps each instance's JQL ORDER BY.", 10, false)
+
+	settingsCard(canvas, rect(20, 386, r.Width()-40, 100))
+	settingsText(canvas, rect(32, 392, 250, 16), "Updates", 12, true)
+	settingsButton(canvas, l.updateCheck, onOff("Check daily", s.config.UpdateCheck), s.config.UpdateCheck)
+	settingsButton(canvas, l.checkNow, "Check now", false)
+	info := "Checks GitHub for new releases of Jira Quick Access."
+	if s.update.Version != "" {
+		settingsButton(canvas, l.openRelease, "Release notes ↗", true)
+		info = "Version " + s.update.Version + " is available: brew upgrade --cask jira-quick-access"
+	}
+	settingsText(canvas, rect(32, 444, r.Width()-64, 14), info, 10, s.update.Version != "")
 }

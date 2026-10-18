@@ -19,11 +19,11 @@ func TestSettingsLayoutVisibleControlsDoNotOverlap(t *testing.T) {
 	for _, x := range []float32{8, 118} {
 		for _, count := range []int{1, 4, 5, 13} {
 			for selected := 0; selected < count; selected++ {
-				for _, section := range []settingsSection{settingsInstances, settingsApplication} {
+				for _, section := range []settingsSection{settingsInstances, settingsApplication, settingsSystem} {
 					t.Run(fmt.Sprintf("x%.0f/count%d/selected%d/page%d", x, count, selected, section), func(t *testing.T) {
 						r := geometry.NewRect(x, 8, 654, 564)
 						l := newSettingsLayout(r, count, selected, 5)
-						controls := []geometry.Rect{l.instancesTab, l.applicationTab, l.close, l.save}
+						controls := []geometry.Rect{l.instancesTab, l.applicationTab, l.systemTab, l.updateBadge, l.close, l.save}
 						for _, field := range l.visibleFields(section) {
 							controls = append(controls, l.fields[field-1])
 						}
@@ -50,6 +50,9 @@ func TestSettingsLayoutVisibleControlsDoNotOverlap(t *testing.T) {
 							for _, center := range l.colorCenters {
 								controls = append(controls, geometry.NewRect(center.X-12, center.Y-12, 24, 24))
 							}
+						} else if section == settingsSystem {
+							controls = append(controls, l.launchAtLogin, l.globalHotKey, l.notifications, l.updateCheck, l.checkNow, l.openRelease)
+							controls = append(controls, l.sortButtons[:]...)
 						} else {
 							controls = append(controls, l.leftEdge, l.rightEdge, l.alwaysOnTop, l.autoHide, l.statusEnabled, l.demoMode, l.debugMode)
 							controls = append(controls, l.monitorButtons...)

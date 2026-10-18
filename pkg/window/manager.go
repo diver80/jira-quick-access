@@ -93,3 +93,13 @@ func SetTucked(tucked bool, width, height int) {
 		DefaultManager.SetTucked(tucked, width, height)
 	}
 }
+
+// LoginItemStatus describes whether the app starts at login.
+type LoginItemStatus int
+
+const (
+	LoginItemUnsupported   LoginItemStatus = iota // macOS < 13 or not running as an app bundle
+	LoginItemDisabled                             // not registered
+	LoginItemEnabled                              // starts at login
+	LoginItemNeedsApproval                        // registered, but blocked in System Settings › Login Items
+)

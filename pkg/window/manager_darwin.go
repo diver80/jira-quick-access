@@ -14,13 +14,12 @@ package window
 
 extern void goCollapseCallback(void);
 extern void goDockChangedCallback(int side, int screenIndex, double yRatio);
-extern void JQAOpenPanelPageExternally(WKWebView *webView, NSURL *fallback);
+extern NSView *JQAHeaderCreate(NSView *contentView, WKWebView *webView);
+extern CGFloat JQAHeaderHeight(void);
 
 static NSWindow *g_appWindow = nil;
 static WKWebView *g_ticketWebView = nil;
-static NSButton *g_closeButton = nil;
-static NSButton *g_externalButton = nil;
-static NSURL *g_ticketURL = nil;    // Ticket loaded in the panel; nil for the offline HTML card
+static NSView *g_headerView = nil;  // Ticket key and actions above the web view (system_darwin.m)
 static int g_dockSide = 0;          // 0: Right, 1: Left
 static int g_screenIndex = 0;       // Monitor index (0..N-1)
 static double g_dockYRatio = 0.5;   // 0.0 - 1.0 (0.5 = centered)
@@ -60,8 +59,6 @@ static void SetupDarwinEditMenu(void) {
 
 // Allow borderless HUD window to become key, receive text input, and handle Escape / Cmd shortcuts
 @interface NSWindow (AllowKeyWindow)
-- (void)onCloseHUDClicked:(id)sender;
-- (void)onOpenExternalHUDClicked:(id)sender;
 @end
 
 @implementation NSWindow (AllowKeyWindow)
@@ -70,12 +67,6 @@ static void SetupDarwinEditMenu(void) {
 }
 - (BOOL)canBecomeMainWindow {
     return YES;
-}
-- (void)onCloseHUDClicked:(id)sender {
-    goCollapseCallback();
-}
-- (void)onOpenExternalHUDClicked:(id)sender {
-    JQAOpenPanelPageExternally(g_ticketWebView, g_ticketURL);
 }
 - (BOOL)performKeyEquivalent:(NSEvent *)event {
     // Escape key (keyCode 53) collapses view
@@ -107,10 +98,10 @@ static void SetupDarwinEditMenu(void) {
 
 static void MakeLayersTransparent(CALayer *layer) {
     if (!layer) return;
-    // The ticket panel and its HUD buttons have their own backgrounds; clearing them
-    // on every dock leaves white-on-white buttons over the Jira page.
+    // The ticket panel and its header have their own backgrounds; clearing them on
+    // every dock leaves white-on-white controls over the Jira page.
     id owner = layer.delegate;
-    if (owner != nil && (owner == g_ticketWebView || owner == g_closeButton || owner == g_externalButton)) return;
+    if (owner != nil && (owner == g_ticketWebView || owner == g_headerView)) return;
     layer.opaque = NO;
     layer.backgroundColor = [[NSColor clearColor] CGColor];
     for (CALayer *sub in layer.sublayers) {
@@ -451,43 +442,6 @@ static NSString *const kHideJiraHeaderScript =
 extern void JQAInstallWebViewDelegate(WKWebView *webView);
 extern void JQAAllowHostInPanel(NSString *host);
 
-static NSButton *NewHUDButton(NSString *title, SEL action, NSString *toolTip) {
-    NSButton *button = [[NSButton alloc] initWithFrame:NSMakeRect(0, 0, 32, 32)];
-    [button setBezelStyle:NSBezelStyleRegularSquare];
-    [button setButtonType:NSButtonTypeMomentaryPushIn];
-    [button setBordered:NO];
-    [button setTarget:g_appWindow];
-    [button setAction:action];
-    [button setToolTip:toolTip];
-    [button setWantsLayer:YES];
-    [button.layer setCornerRadius:16.0];
-    [button.layer setMasksToBounds:YES];
-    [button.layer setBorderWidth:1.5];
-    [button.layer setBorderColor:[[NSColor colorWithCalibratedWhite:1.0 alpha:0.65] CGColor]];
-    [button.layer setBackgroundColor:[[NSColor colorWithCalibratedRed:0.08 green:0.11 blue:0.18 alpha:0.96] CGColor]];
-
-    NSDictionary *attrs = @{
-        NSForegroundColorAttributeName: [NSColor whiteColor],
-        NSFontAttributeName: [NSFont boldSystemFontOfSize:14.0]
-    };
-    NSAttributedString *attrTitle = [[NSAttributedString alloc] initWithString:title attributes:attrs];
-    [button setAttributedTitle:attrTitle];
-    [attrTitle release];
-    return button;
-}
-
-// Places a HUD button above the web view; hidden buttons stay in the hierarchy.
-static void ShowHUDButton(NSButton *button, NSRect frame, BOOL show) {
-    if (!button) return;
-    [button setFrame:frame];
-    [button.layer setZPosition:9999.0];
-    NSView *cv = [g_appWindow contentView];
-    if (cv) {
-        [cv addSubview:button positioned:NSWindowAbove relativeTo:nil];
-    }
-    [button setHidden:!show];
-}
-
 static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
     dispatch_async(dispatch_get_main_queue(), ^{
         SetupDarwinEditMenu();
@@ -503,7 +457,9 @@ static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
             CGFloat cardW = (CGFloat)(w - 118);
             CGFloat cardH = (CGFloat)(h - 16);
             CGFloat cardX = (g_dockSide == 1) ? 110.0 : 8.0;
-            CGFloat closeX = (g_dockSide == 1) ? 118.0 : 16.0;
+            // The header sits on top of the card; the web view fills the rest.
+            CGFloat headerH = JQAHeaderHeight();
+            CGFloat webH = cardH - headerH - 4;
 
             if (!g_ticketWebView && g_appWindow) {
                 NSView *contentView = [g_appWindow contentView];
@@ -516,7 +472,7 @@ static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
                     [userContent addUserScript:script];
                     config.userContentController = userContent;
 
-                    g_ticketWebView = [[WKWebView alloc] initWithFrame:NSMakeRect(cardX, 8, cardW, cardH) configuration:config];
+                    g_ticketWebView = [[WKWebView alloc] initWithFrame:NSMakeRect(cardX, 8, cardW, webH) configuration:config];
                     [script release];
                     [userContent release];
                     [config release];
@@ -530,13 +486,11 @@ static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
                     [g_ticketWebView.layer setZPosition:0.0];
                     [contentView addSubview:g_ticketWebView];
 
-                    // Floating sleek high-contrast HUD buttons: close (✕) and open in browser (↗)
-                    g_closeButton = NewHUDButton(@"✕", @selector(onCloseHUDClicked:), @"Close (Esc)");
-                    g_externalButton = NewHUDButton(@"↗", @selector(onOpenExternalHUDClicked:), @"Open in browser");
+                    g_headerView = JQAHeaderCreate(contentView, g_ticketWebView);
                 }
             }
             if (g_ticketWebView) {
-                [g_ticketWebView setFrame:NSMakeRect(cardX, 8, cardW, cardH)];
+                [g_ticketWebView setFrame:NSMakeRect(cardX, 8, cardW, webH)];
                 [g_ticketWebView.layer setCornerRadius:14.0];
                 [g_ticketWebView.layer setMasksToBounds:YES];
                 [g_ticketWebView.layer setBorderWidth:1.5];
@@ -545,8 +499,10 @@ static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
                 [g_ticketWebView setHidden:NO];
                 [g_ticketWebView evaluateJavaScript:kHideJiraHeaderScript completionHandler:nil];
             }
-            ShowHUDButton(g_closeButton, NSMakeRect(closeX, (CGFloat)(h - 44), 32, 32), YES);
-            ShowHUDButton(g_externalButton, NSMakeRect(closeX + 40, (CGFloat)(h - 44), 32, 32), g_ticketURL != nil);
+            if (g_headerView) {
+                [g_headerView setFrame:NSMakeRect(cardX, 8 + cardH - headerH, cardW, headerH)];
+                [g_headerView setHidden:NO];
+            }
             if (g_appWindow) {
                 [g_appWindow makeKeyAndOrderFront:nil];
             }
@@ -554,11 +510,8 @@ static void DarwinSetMobileWebViewVisible(int visible, int w, int h) {
             if (g_ticketWebView) {
                 [g_ticketWebView setHidden:YES];
             }
-            if (g_closeButton) {
-                [g_closeButton setHidden:YES];
-            }
-            if (g_externalButton) {
-                [g_externalButton setHidden:YES];
+            if (g_headerView) {
+                [g_headerView setHidden:YES];
             }
         }
     });
@@ -571,9 +524,6 @@ static void DarwinLoadMobileTicketView(const char *urlStr) {
         if (!g_ticketWebView) return;
         NSURL *url = [NSURL URLWithString:nsStr];
         if (url) {
-            [g_ticketURL release];
-            g_ticketURL = [url retain];
-            if (g_externalButton && [g_ticketWebView isHidden] == NO) [g_externalButton setHidden:NO];
             JQAAllowHostInPanel([url host]);
             NSURLRequest *req = [NSURLRequest requestWithURL:url];
             [g_ticketWebView loadRequest:req];
@@ -588,9 +538,6 @@ static void DarwinLoadMobileTicketHTML(const char *htmlStr, const char *baseURLS
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!g_ticketWebView) return;
         NSURL *baseURL = nsBase ? [NSURL URLWithString:nsBase] : nil;
-        [g_ticketURL release];
-        g_ticketURL = nil;
-        if (g_externalButton) [g_externalButton setHidden:YES];
         [g_ticketWebView loadHTMLString:nsHtml baseURL:baseURL];
     });
 }

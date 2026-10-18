@@ -214,23 +214,56 @@ func (c *Client) VerifyInstanceConnection(ctx context.Context, baseURL, email, t
 
 // FetchAssignedIssues fetches assigned tickets across all configured instances concurrently.
 func (c *Client) FetchAssignedIssues(ctx context.Context) ([]Issue, error) {
+	res := c.FetchAllInstances(ctx)
+	if len(res.Issues) == 0 && len(res.Failed) > 0 {
+		return nil, res.FirstError()
+	}
+	return res.Issues, nil
+}
+
+// FetchResult is the outcome of one refresh across all configured instances.
+type FetchResult struct {
+	Issues []Issue
+	// Loaded holds the IDs of instances whose tickets are complete in Issues.
+	Loaded map[string]bool
+	// Failed maps instance IDs to the error that kept their tickets out of Issues.
+	Failed map[string]error
+	// order lists failed instance IDs in configuration order for FirstError.
+	order []string
+}
+
+// FirstError returns the error of the first failed instance in configuration order.
+func (r FetchResult) FirstError() error {
+	for _, id := range r.order {
+		if err := r.Failed[id]; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// FetchAllInstances queries every configured instance concurrently. Tickets are
+// returned in configuration order (and Jira's order within an instance), so the
+// list does not reshuffle depending on which site answered first.
+func (c *Client) FetchAllInstances(ctx context.Context) FetchResult {
 	cfg := c.GetConfig()
 	debug := cfg.DebugMode
+	res := FetchResult{Loaded: map[string]bool{}, Failed: map[string]error{}}
 
 	if cfg.DemoMode {
-		return GetMockIssues(cfg.PinnedKeys), nil
+		res.Issues = GetMockIssues(cfg.PinnedKeys)
+		for _, iss := range res.Issues {
+			res.Loaded[iss.InstanceID] = true
+		}
+		return res
 	}
 
 	cfg.EnsureInstances()
 
-	var (
-		mu        sync.Mutex
-		allIssues []Issue
-		lastErr   error
-		wg        sync.WaitGroup
-	)
-
-	for _, inst := range cfg.Instances {
+	perInstance := make([][]Issue, len(cfg.Instances))
+	errs := make([]error, len(cfg.Instances))
+	var wg sync.WaitGroup
+	for i, inst := range cfg.Instances {
 		if inst.BaseURL == "" || inst.APIToken == "" {
 			if debug {
 				log.Printf("[Jira DEBUG] Skipping instance %q (baseURL=%q, tokenLen=%d)", inst.Name, inst.BaseURL, len(inst.APIToken))
@@ -239,36 +272,37 @@ func (c *Client) FetchAssignedIssues(ctx context.Context) ([]Issue, error) {
 		}
 
 		wg.Add(1)
-		go func(targetInst InstanceConfig) {
+		go func(i int, targetInst InstanceConfig) {
 			defer wg.Done()
 			if debug {
 				log.Printf("[Jira DEBUG] Fetching issues for instance %q (%s)...", targetInst.Name, targetInst.BaseURL)
 			}
-
 			issues, err := c.fetchIssuesForInstance(ctx, targetInst)
-			mu.Lock()
-			defer mu.Unlock()
-
 			if err != nil {
 				log.Printf("[Jira WARN] Failed to fetch issues for %s (%s): %v", targetInst.Name, targetInst.BaseURL, err)
-				lastErr = err
+				errs[i] = err
 				return
 			}
-
 			if debug {
 				log.Printf("[Jira DEBUG] Retrieved %d issues for %q", len(issues), targetInst.Name)
 			}
-			allIssues = append(allIssues, issues...)
-		}(inst)
+			perInstance[i] = issues
+		}(i, inst)
 	}
-
 	wg.Wait()
 
-	if len(allIssues) == 0 && lastErr != nil {
-		return nil, lastErr
+	for i, inst := range cfg.Instances {
+		if errs[i] != nil {
+			res.Failed[inst.ID] = errs[i]
+			res.order = append(res.order, inst.ID)
+			continue
+		}
+		if inst.BaseURL != "" && inst.APIToken != "" {
+			res.Loaded[inst.ID] = true
+		}
+		res.Issues = append(res.Issues, perInstance[i]...)
 	}
-
-	return allIssues, nil
+	return res
 }
 
 const (

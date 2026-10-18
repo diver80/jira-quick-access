@@ -7,7 +7,13 @@ type settingsSection uint8
 const (
 	settingsInstances settingsSection = iota
 	settingsApplication
+	settingsSystem
 )
+
+// sortModes lists the ticket orders offered on the system page, in button order.
+var sortModes = []struct{ mode, label string }{
+	{"", "Jira order"}, {"updated", "Last updated"}, {"priority", "Priority"}, {"status", "Status"},
+}
 
 type settingsInstanceTab struct {
 	index int
@@ -28,6 +34,11 @@ type settingsLayout struct {
 	monitorButtons                                []geometry.Rect
 	statusEnabled, demoMode, debugMode            geometry.Rect
 	intervalPresets                               [3]geometry.Rect
+
+	systemTab, updateBadge                     geometry.Rect
+	launchAtLogin, globalHotKey, notifications geometry.Rect
+	sortButtons                                [4]geometry.Rect
+	updateCheck, checkNow, openRelease         geometry.Rect
 }
 
 func newSettingsLayout(r geometry.Rect, instanceCount, selectedInstance, monitorCount int) settingsLayout {
@@ -37,14 +48,21 @@ func newSettingsLayout(r geometry.Rect, instanceCount, selectedInstance, monitor
 	w := r.Width()
 	l := settingsLayout{
 		bounds:       r,
-		instancesTab: rect(20, 48, 154, 30), applicationTab: rect(180, 48, 154, 30),
-		close: rect(w-76, 14, 56, 26), save: rect(w-156, r.Height()-40, 136, 28),
+		instancesTab: rect(20, 48, 154, 30), applicationTab: rect(180, 48, 154, 30), systemTab: rect(340, 48, 154, 30),
+		updateBadge: rect(178, 18, 132, 19),
+		close:       rect(w-76, 14, 56, 26), save: rect(w-156, r.Height()-40, 136, 28),
 		importEnv: rect(32, 460, 94, 28), testConnection: rect(134, 460, 134, 28),
 		deleteInstance: rect(w-158, 460, 126, 28), addInstance: rect(w-112, 144, 80, 26),
 		leftEdge: rect(32, 178, 95, 26), rightEdge: rect(135, 178, 95, 26),
 		alwaysOnTop: rect(244, 178, 140, 26), autoHide: rect(392, 178, w-424, 26),
 		statusEnabled: rect(310, 346, 180, 26),
 		demoMode:      rect(32, 454, 150, 28), debugMode: rect(190, 454, 140, 28),
+		launchAtLogin: rect(32, 128, 200, 26), globalHotKey: rect(244, 128, 200, 26),
+		notifications: rect(32, 230, 200, 26),
+		updateCheck:   rect(32, 410, 200, 26), checkNow: rect(244, 410, 120, 26), openRelease: rect(w-174, 410, 142, 26),
+	}
+	for i := range l.sortButtons {
+		l.sortButtons[i] = rect(32+float32(i)*112, 318, 104, 26)
 	}
 	for i := 0; i < 5; i++ {
 		l.fields[i] = rect(32, 196+float32(i)*44, w-64, 26)
@@ -94,8 +112,11 @@ func newSettingsLayout(r geometry.Rect, instanceCount, selectedInstance, monitor
 }
 
 func (l settingsLayout) visibleFields(section settingsSection) []int {
-	if section == settingsApplication {
+	switch section {
+	case settingsApplication:
 		return []int{6, 7}
+	case settingsSystem:
+		return nil
 	}
 	return []int{1, 2, 3, 4, 5}
 }

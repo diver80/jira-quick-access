@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 
 	"jira-quick-access/pkg/jira"
 	"jira-quick-access/pkg/status"
+	"jira-quick-access/pkg/update"
 	"jira-quick-access/pkg/window"
 
 	"github.com/gogpu/ui/event"
@@ -99,6 +101,16 @@ type AppView struct {
 	onResize       func(w, h int)
 	onConfigReload func()
 
+	// Refresh bookkeeping: per-instance errors (by instance ID), instances whose
+	// tickets were complete in the last refresh, and when tickets were last opened.
+	instErrors      map[string]string
+	loadedInstances map[string]bool
+	viewedAt        map[string]time.Time
+
+	loginItem     window.LoginItemStatus
+	update        update.Release // newer release, if one was found
+	updateChecker update.Checker
+
 	// UI-thread task queue: background goroutines must not resize the window or
 	// switch states themselves (gogpu's window state is not goroutine-safe).
 	uiQueueEnabled atomic.Bool
@@ -149,6 +161,9 @@ type appViewStateSnapshot struct {
 	statusMsg         string
 	version           string
 	config            jira.Config
+	instErrors        map[string]string
+	loginItem         window.LoginItemStatus
+	update            update.Release
 }
 
 func NewAppView(
@@ -192,6 +207,7 @@ func NewAppView(
 		ctx:                ctx,
 		cancel:             cancel,
 		cacheDirty:         true,
+		viewedAt:           map[string]time.Time{},
 	}
 
 	if window.DefaultManager != nil {
@@ -718,6 +734,9 @@ func (v *AppView) snapshot() appViewStateSnapshot {
 		statusMsg:         v.statusMsg,
 		version:           v.version,
 		config:            cfg,
+		instErrors:        maps.Clone(v.instErrors),
+		loginItem:         v.loginItem,
+		update:            v.update,
 	}
 }
 
@@ -811,23 +830,21 @@ func (v *AppView) SetState(newState window.WindowState) {
 
 func (v *AppView) loadActiveTicketInMobileView() {
 	v.mu.Lock()
-	issues := v.issues
-	activeIdx := v.activeIdx
-	cfg := v.config
-	v.mu.Unlock()
-
-	if len(issues) == 0 || activeIdx >= len(issues) {
+	if v.activeIdx < 0 || v.activeIdx >= len(v.issues) {
+		v.mu.Unlock()
 		return
 	}
+	iss := v.issues[v.activeIdx]
+	cfg := v.config
+	v.viewedAt[issueID(iss)] = time.Now()
+	v.mu.Unlock()
 
-	iss := issues[activeIdx]
-
-	if !cfg.DemoMode && (iss.BaseURL != "" || cfg.BaseURL != "") {
-		baseURL := iss.BaseURL
-		if baseURL == "" {
-			baseURL = cfg.BaseURL
-		}
-		url := fmt.Sprintf("%s/browse/%s", strings.TrimRight(baseURL, "/"), iss.Key)
+	url := ""
+	if !cfg.DemoMode {
+		url = ticketURL(iss, cfg.BaseURL)
+	}
+	window.SetTicketHeader(iss.Key, iss.Summary, url, branchName(cfg.BranchPrefix, iss))
+	if url != "" {
 		window.LoadMobileTicketView(url)
 	} else {
 		html := generateMobileTicketHTML(iss)
@@ -1078,7 +1095,7 @@ func (v *AppView) RefreshIssues() {
 
 	go func() {
 		defer v.wg.Done()
-		issues, err := v.client.FetchAssignedIssues(v.ctx)
+		res := v.client.FetchAllInstances(v.ctx)
 		select {
 		case <-v.ctx.Done():
 			return
@@ -1086,35 +1103,22 @@ func (v *AppView) RefreshIssues() {
 		}
 
 		v.mu.Lock()
-		defer v.mu.Unlock()
-
 		// A newer refresh (e.g. after saving new credentials) supersedes this one.
 		if gen != v.refreshGen {
+			v.mu.Unlock()
 			return
 		}
-
-		if err != nil {
-			v.toast = NewToast(fmt.Sprintf("Sync error: %v", err))
-		} else {
-			// Jira reorders results (e.g. ORDER BY updated), so keep the selection on the
-			// same ticket rather than the same list position.
-			var prevActive *jira.Issue
-			if v.activeIdx >= 0 && v.activeIdx < len(v.issues) {
-				prevActive = &v.issues[v.activeIdx]
-			}
-			newIdx := 0
-			if prevActive != nil {
-				if idx := indexOfIssue(issues, *prevActive); idx >= 0 {
-					newIdx = idx
-				}
-			}
-			v.issues = issues
-			v.activeIdx = newIdx
-			if len(issues) > 0 {
-				v.activeTheme = GetTicketTheme(v.activeIdx)
-			}
+		changes, newFailures := v.applyFetchResultLocked(res)
+		if len(newFailures) > 0 {
+			v.toast = NewToast("Sync error — " + strings.Join(newFailures, "; "))
 		}
+		notify := v.config.Notifications
 		v.invalidateFilterCacheLocked()
+		v.mu.Unlock()
+
+		if notify {
+			notifyChanges(changes)
+		}
 		v.postToUI(v.MarkNeedsLayout)
 	}()
 }
@@ -1310,6 +1314,9 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 
 			// User-defined profile accent color palette
 			beaconColor, beaconGlow, inProgColor, todoColor, trackColor, badgeBg, badgeBorder := GetInstanceColors(inst.Color, idx)
+			if s.instErrors[inst.ID] != "" {
+				beaconColor, beaconGlow = colorSyncError, colorSyncErrorGlow
+			}
 
 			// Instance Beacon Core & Radiant Glow (Centered at capsule middle X)
 			beaconCenter := geometry.Pt(centerX, secY+8)
@@ -1405,6 +1412,9 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		canvas.DrawRoundRect(setRect, setBg, 5)
 		canvas.StrokeRoundRect(setRect, setBorder, 5, 1.0)
 		canvas.DrawText("⚙", setRect, 11, widget.RGBA8(220, 235, 255, 240), true, widget.TextAlignCenter)
+		if s.update.Version != "" {
+			drawUpdateDot(canvas, geometry.Pt(setRect.Max.X-1, setRect.Min.Y+1))
+		}
 		return
 	}
 
@@ -1433,6 +1443,11 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			inst := s.instances[s.activeInstIdx]
 			instName = inst.Name
 			instBeaconColor, _, _, _, _, _, _ = GetInstanceColors(inst.Color, s.activeInstIdx)
+			if s.instErrors[inst.ID] != "" {
+				instBeaconColor = colorSyncError
+			}
+		} else if len(s.instErrors) > 0 {
+			instBeaconColor = colorSyncError
 		}
 		if len(instName) > 12 {
 			instName = instName[:10] + ".."
@@ -1602,6 +1617,9 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		canvas.StrokeRoundRect(settingsTabRect, setBorder, 8, 1.0)
 		setTxtRect := geometry.NewRect(setX+2, settingsTabY+9, setW-4, 16)
 		canvas.DrawText("⚙ Settings", setTxtRect, 10, widget.RGBA8(230, 240, 255, 255), true, widget.TextAlignCenter)
+		if s.update.Version != "" {
+			drawUpdateDot(canvas, geometry.Pt(settingsTabRect.Max.X-9, settingsTabRect.Min.Y+9))
+		}
 		return
 	}
 
@@ -1770,6 +1788,9 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	canvas.StrokeRoundRect(settingsTabRect, widget.RGBA8(255, 255, 255, 45), 8, 1.0)
 	setTxtRect := geometry.NewRect(tabStartX+4, settingsTabY+9, tabBarWidth-18, 16)
 	canvas.DrawText("⚙ Settings", setTxtRect, 10, widget.RGBA8(230, 240, 255, 255), true, widget.TextAlignCenter)
+	if s.update.Version != "" {
+		drawUpdateDot(canvas, geometry.Pt(settingsTabRect.Max.X-9, settingsTabRect.Min.Y+9))
+	}
 
 	// Overlays (if active)
 	if s.showStatus {
@@ -2712,50 +2733,31 @@ func (v *AppView) handleKey(ev *event.KeyEvent) bool {
 			v.mu.Lock()
 			var targetURL string
 			if v.activeIdx >= 0 && v.activeIdx < len(v.issues) {
-				iss := v.issues[v.activeIdx]
-				baseURL := iss.BaseURL
-				if baseURL == "" {
-					baseURL = v.config.BaseURL
-				}
-				targetURL = fmt.Sprintf("%s/browse/%s", strings.TrimRight(baseURL, "/"), iss.Key)
+				targetURL = ticketURL(v.issues[v.activeIdx], v.config.BaseURL)
 			}
 			v.mu.Unlock()
-			if targetURL != "" {
-				if window.DefaultManager != nil {
-					_ = window.DefaultManager.OpenTicketURL(targetURL)
-				}
-				v.showToast("Opening ticket in browser")
+			if targetURL == "" {
+				v.showToast("No Jira link for this ticket")
 				return true
 			}
+			if window.DefaultManager != nil {
+				_ = window.DefaultManager.OpenTicketURL(targetURL)
+			}
+			v.showToast("Opening ticket in browser")
+			return true
 		}
 
 		// Cmd+Shift+C: Copy Git branch name
 		if isCmdOrCtrl && isShift && (ev.Key == event.KeyC || ev.Rune == 'c' || ev.Rune == 'C') {
 			v.mu.Lock()
-			var branchName string
+			var branch string
 			if v.activeIdx >= 0 && v.activeIdx < len(v.issues) {
-				iss := v.issues[v.activeIdx]
-				prefix := v.config.BranchPrefix
-				if prefix == "" {
-					prefix = "feature/"
-				}
-				slug := strings.ToLower(iss.Summary)
-				slug = strings.Map(func(r rune) rune {
-					if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-						return r
-					}
-					return '-'
-				}, slug)
-				slug = strings.Trim(slug, "-")
-				if len(slug) > 30 {
-					slug = slug[:30]
-				}
-				branchName = fmt.Sprintf("%s%s-%s", prefix, iss.Key, slug)
+				branch = branchName(v.config.BranchPrefix, v.issues[v.activeIdx])
 			}
 			v.mu.Unlock()
-			if branchName != "" {
-				copyToClipboard(branchName)
-				v.showToast("✓ Copied branch: " + branchName)
+			if branch != "" {
+				copyToClipboard(branch)
+				v.showToast("✓ Copied branch: " + branch)
 				return true
 			}
 		}
@@ -2808,6 +2810,10 @@ func (v *AppView) handleKey(ev *event.KeyEvent) bool {
 	// when no field is focused after switching sections.
 	if showSettings && !isCmdOrCtrl && (ev.Key == event.KeyTab || ev.Key == event.KeyEnter) {
 		v.mu.Lock()
+		if v.settingsSection == settingsSystem {
+			v.mu.Unlock() // no text fields on this page
+			return true
+		}
 		first, last := 1, 5
 		if v.settingsSection == settingsApplication {
 			first, last = 6, 7
@@ -3155,4 +3161,16 @@ func pasteFromClipboard() string {
 		return ""
 	}
 	return strings.TrimRight(string(out), "\r\n")
+}
+
+// Sync failures turn the instance beacon red.
+var (
+	colorSyncError     = widget.RGBA8(239, 68, 68, 255)
+	colorSyncErrorGlow = widget.RGBA8(239, 68, 68, 85)
+)
+
+// drawUpdateDot marks the settings entry when a newer release is available.
+func drawUpdateDot(canvas widget.Canvas, center geometry.Point) {
+	canvas.DrawCircle(center, 4.5, widget.RGBA8(13, 24, 42, 255))
+	canvas.DrawCircle(center, 3.2, widget.RGBA8(96, 165, 250, 255))
 }

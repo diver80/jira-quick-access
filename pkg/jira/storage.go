@@ -203,6 +203,11 @@ func LoadConfig() Config {
 			cfg.AlwaysOnTop = true
 		}
 		cfg.AutoHide = saved.AutoHide
+		// Features added in 1.1 default to on for configs written by older versions.
+		cfg.GlobalHotKey = saved.GlobalHotKey || !bytes.Contains(data, []byte("\"global_hotkey\""))
+		cfg.Notifications = saved.Notifications || !bytes.Contains(data, []byte("\"notifications\""))
+		cfg.UpdateCheck = saved.UpdateCheck || !bytes.Contains(data, []byte("\"update_check\""))
+		cfg.SortMode = saved.SortMode
 	} else {
 		// First launch: No config.json exists on disk yet.
 		// Check if .env supplies credentials; otherwise enable Demo Mode for out-of-the-box preview.

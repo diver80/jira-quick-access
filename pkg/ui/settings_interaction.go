@@ -16,6 +16,9 @@ func (v *AppView) switchSettingsSection(section settingsSection) {
 	v.activeField, v.cursorPos, v.selectAll = 0, 0, false
 	v.statusMsg = ""
 	v.mu.Unlock()
+	if section == settingsSystem {
+		v.refreshLoginItemStatus()
+	}
 	v.MarkNeedsLayout()
 }
 
@@ -34,6 +37,7 @@ func (v *AppView) handleSettingsClick(r geometry.Rect, pos geometry.Point) bool 
 	v.mu.Lock()
 	section, selected, count := v.settingsSection, v.selectedInstIdx, len(v.config.Instances)
 	monitors := append([]window.MonitorInfo(nil), v.monitors...)
+	hasUpdate := v.update.Version != ""
 	v.mu.Unlock()
 	l := newSettingsLayout(r, count, selected, len(monitors))
 	switch {
@@ -43,11 +47,19 @@ func (v *AppView) handleSettingsClick(r geometry.Rect, pos geometry.Point) bool 
 	case l.applicationTab.Contains(pos):
 		v.switchSettingsSection(settingsApplication)
 		return true
+	case l.systemTab.Contains(pos), hasUpdate && l.updateBadge.Contains(pos):
+		v.switchSettingsSection(settingsSystem)
+		return true
 	case l.close.Contains(pos):
 		v.CloseSettings()
 		return true
 	case l.save.Contains(pos):
 		v.saveSettings()
+		return true
+	}
+
+	if section == settingsSystem {
+		v.handleSystemSettingsClick(l, pos, hasUpdate)
 		return true
 	}
 
@@ -205,6 +217,38 @@ func (v *AppView) importSettingsEnvironment() {
 		v.invalidateFilterCacheLocked()
 	} else {
 		v.statusMsg = "No Jira credentials found in .env."
+	}
+	v.MarkNeedsLayout()
+}
+
+func (v *AppView) handleSystemSettingsClick(l settingsLayout, pos geometry.Point, hasUpdate bool) {
+	v.mu.Lock()
+	cfg := v.config
+	releaseURL := v.update.URL
+	v.activeField, v.selectAll = 0, false
+	v.mu.Unlock()
+
+	switch {
+	case l.launchAtLogin.Contains(pos):
+		v.toggleLaunchAtLogin()
+	case l.globalHotKey.Contains(pos):
+		v.SetGlobalHotKeyEnabled(!cfg.GlobalHotKey)
+	case l.notifications.Contains(pos):
+		v.SetNotificationsEnabled(!cfg.Notifications)
+	case l.updateCheck.Contains(pos):
+		v.SetUpdateCheckEnabled(!cfg.UpdateCheck)
+	case l.checkNow.Contains(pos):
+		v.checkForUpdateNow()
+	case hasUpdate && l.openRelease.Contains(pos):
+		if releaseURL != "" {
+			_ = window.OpenURL(releaseURL)
+		}
+	default:
+		for i, button := range l.sortButtons {
+			if button.Contains(pos) {
+				v.SetSortMode(sortModes[i].mode)
+			}
+		}
 	}
 	v.MarkNeedsLayout()
 }

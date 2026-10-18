@@ -8,7 +8,7 @@ set -e
 APP_NAME="jira-quick-access"
 APP_DISPLAY_NAME="Jira Quick Access"
 BUNDLE_ID="com.avono.jira-quick-access"
-VERSION="${VERSION:-1.0.8}"
+VERSION="${VERSION:-1.1.0}"
 BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS="-s -w -X main.version=${VERSION} -X main.buildTime=${BUILD_TIME}"
 DIST_DIR="$(pwd)/dist"
@@ -121,6 +121,13 @@ build_osx() {
 </dict>
 </plist>
 EOF
+
+    # Ad-hoc sign the whole bundle so its identity matches the bundle ID (lipo leaves
+    # the linker's per-binary "a.out" signature). Notifications and login items rely on it.
+    if command -v codesign >/dev/null 2>&1; then
+        echo -e "   -> Ad-hoc signing app bundle as ${BUNDLE_ID}..."
+        codesign --force --sign - --identifier "${BUNDLE_ID}" "${APP_BUNDLE}"
+    fi
 
     # 4. Create DMG Installer
     if command -v hdiutil >/dev/null 2>&1; then

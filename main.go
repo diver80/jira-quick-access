@@ -8,6 +8,7 @@ import (
 
 	"jira-quick-access/pkg/jira"
 	"jira-quick-access/pkg/ui"
+	"jira-quick-access/pkg/update"
 	"jira-quick-access/pkg/window"
 
 	"github.com/gogpu/gogpu"
@@ -18,7 +19,7 @@ import (
 )
 
 var (
-	version   = "1.0.8"
+	version   = "1.1.0"
 	buildTime = "unknown"
 )
 
@@ -83,6 +84,14 @@ func main() {
 	// Background goroutines queue state changes; run them on the event/UI thread.
 	rootView.EnableUIThreadQueue()
 	gogpuApp.OnUpdate(func(float64) { rootView.RunUITasks() })
+
+	// System integrations: ⌥⌘J from any app, change notifications, release check.
+	window.RegisterHotKeyHandler(func() { rootView.PostToUI(rootView.HandleGlobalHotKey) })
+	window.SetGlobalHotKey(cfg.GlobalHotKey)
+	if cfg.Notifications {
+		rootView.EnableNotifications()
+	}
+	rootView.StartUpdateChecks(update.Checker{})
 
 	reloadCh := make(chan struct{}, 1)
 	rootView.SetOnConfigReload(func() {
