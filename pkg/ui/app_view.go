@@ -96,6 +96,12 @@ type AppView struct {
 	settingsOpenedFrom window.WindowState
 	version            string
 
+	// Board overlay (expanded window): per-column scroll and the hovered card.
+	showBoard        bool
+	boardScroll      [boardColumnCount]float32
+	hoveredBoardCard string // issueID of the hovered card
+	hoveredBoard     bool   // board button hovered (fan and dock shelf)
+
 	// Callbacks
 	onRedraw       func()
 	onResize       func(w, h int)
@@ -164,6 +170,10 @@ type appViewStateSnapshot struct {
 	instErrors        map[string]string
 	loginItem         window.LoginItemStatus
 	update            update.Release
+	showBoard         bool
+	boardScroll       [boardColumnCount]float32
+	hoveredBoardCard  string
+	hoveredBoard      bool
 }
 
 func NewAppView(
@@ -737,6 +747,10 @@ func (v *AppView) snapshot() appViewStateSnapshot {
 		instErrors:        maps.Clone(v.instErrors),
 		loginItem:         v.loginItem,
 		update:            v.update,
+		showBoard:         v.showBoard,
+		boardScroll:       v.boardScroll,
+		hoveredBoardCard:  v.hoveredBoardCard,
+		hoveredBoard:      v.hoveredBoard,
 	}
 }
 
@@ -772,6 +786,8 @@ func (v *AppView) SetState(newState window.WindowState) {
 	v.hoveredTabIdx = -1
 	v.hoveredSettings = false
 	v.hoveredStatus = false
+	v.hoveredBoard = false
+	v.hoveredBoardCard = ""
 	if newState == window.StateFan {
 		v.lastHover = time.Now()
 	} else {
@@ -781,9 +797,11 @@ func (v *AppView) SetState(newState window.WindowState) {
 	if newState == window.StateRest || newState == window.StateFan {
 		v.showSettings = false
 		v.showStatus = false
+		v.showBoard = false
 	}
 	showSettings := v.showSettings
 	showStatus := v.showStatus
+	showBoard := v.showBoard
 	v.mu.Unlock()
 
 	if newState == window.StateRest {
@@ -815,7 +833,7 @@ func (v *AppView) SetState(newState window.WindowState) {
 		onResize(w, h)
 	}
 
-	if newState == window.StateExpanded && !showSettings && !showStatus {
+	if newState == window.StateExpanded && !showSettings && !showStatus && !showBoard {
 		window.SetMobileWebViewVisible(true, w, h)
 		v.loadActiveTicketInMobileView()
 	} else {
@@ -924,6 +942,7 @@ func (v *AppView) Expand(tabIdx int) {
 	v.activeTheme = GetTicketTheme(tabIdx)
 	v.showSettings = false
 	v.showStatus = false
+	v.showBoard = false
 	v.mu.Unlock()
 	v.SetState(window.StateExpanded)
 }
@@ -932,6 +951,7 @@ func (v *AppView) OpenSettings() {
 	v.mu.Lock()
 	v.showSettings = true
 	v.showStatus = false
+	v.showBoard = false
 	if v.state == window.StateRest || v.state == window.StateFan {
 		v.settingsOpenedFrom = v.state
 	}
@@ -946,6 +966,7 @@ func (v *AppView) ToggleSettings() {
 	v.showSettings = !v.showSettings
 	if v.showSettings {
 		v.showStatus = false
+		v.showBoard = false
 		if v.state == window.StateRest || v.state == window.StateFan {
 			v.settingsOpenedFrom = v.state
 		}
@@ -986,6 +1007,7 @@ func (v *AppView) OpenStatus() {
 	v.mu.Lock()
 	v.showStatus = true
 	v.showSettings = false
+	v.showBoard = false
 	if v.state == window.StateRest || v.state == window.StateFan {
 		v.statusOpenedFrom = v.state
 	}
@@ -1009,6 +1031,7 @@ func (v *AppView) ToggleStatus() {
 	v.showStatus = !v.showStatus
 	if v.showStatus {
 		v.showSettings = false
+		v.showBoard = false
 		if v.state == window.StateRest || v.state == window.StateFan {
 			v.statusOpenedFrom = v.state
 		}
@@ -1348,13 +1371,12 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 				todoCount := 0
 				doneCount := 0
 				for _, iss := range instIssues {
-					cat := strings.ToLower(iss.Status.CategoryKey)
-					name := strings.ToLower(iss.Status.Name)
-					if cat == "indeterminate" || strings.Contains(name, "progress") || strings.Contains(name, "dev") {
+					switch boardColumn(iss) {
+					case boardInProgress:
 						inProgCount++
-					} else if cat == "done" || strings.Contains(name, "done") || strings.Contains(name, "closed") {
+					case boardDone:
 						doneCount++
-					} else {
+					default:
 						todoCount++
 					}
 				}
@@ -1600,26 +1622,9 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		dividerY := b.Min.Y + h - 50
 		canvas.DrawLine(geometry.Pt(b.Min.X+10, dividerY), geometry.Pt(b.Min.X+w-10, dividerY), widget.RGBA8(255, 255, 255, 55), 1.0)
 
-		// 8. Settings Tab
-		settingsTabY := b.Min.Y + h - 42
-		setX := b.Min.X + 7
-		setW := w - 14
-		setBg := widget.RGBA8(36, 46, 66, 230)
-		setBorder := widget.RGBA8(255, 255, 255, 45)
-		if s.hoveredSettings {
-			setX = b.Min.X + 4
-			setW = w - 11
-			setBg = widget.RGBA8(52, 68, 96, 245)
-			setBorder = widget.RGBA8(255, 255, 255, 180)
-		}
-		settingsTabRect := geometry.NewRect(setX, settingsTabY, setW, 34)
-		canvas.DrawRoundRect(settingsTabRect, setBg, 8)
-		canvas.StrokeRoundRect(settingsTabRect, setBorder, 8, 1.0)
-		setTxtRect := geometry.NewRect(setX+2, settingsTabY+9, setW-4, 16)
-		canvas.DrawText("⚙ Settings", setTxtRect, 10, widget.RGBA8(230, 240, 255, 255), true, widget.TextAlignCenter)
-		if s.update.Version != "" {
-			drawUpdateDot(canvas, geometry.Pt(settingsTabRect.Max.X-9, settingsTabRect.Min.Y+9))
-		}
+		// 8. Board and Settings buttons
+		drawBoardButton(canvas, fanBoardButtonRect(w, h).Translate(b.Min), false, s.hoveredBoard)
+		drawSettingsIconButton(canvas, fanSettingsButtonRect(w, h).Translate(b.Min), false, s.hoveredSettings, s.update.Version != "")
 		return
 	}
 
@@ -1697,7 +1702,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			}
 
 			tabTheme := GetTicketTheme(i)
-			isActive := activeIss != nil && sameIssue(iss, *activeIss) && !s.showSettings
+			isActive := activeIss != nil && sameIssue(iss, *activeIss) && !s.showSettings && !s.showBoard
 			isHovered := (i == s.hoveredTabIdx)
 			tabWidth := tabBarWidth - 14
 			tabX := tabStartX + 2
@@ -1777,20 +1782,9 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	dividerY := b.Min.Y + h - 56
 	canvas.DrawLine(geometry.Pt(tabStartX+8, dividerY), geometry.Pt(tabStartX+tabBarWidth-12, dividerY), widget.RGBA8(255, 255, 255, 55), 1.0)
 
-	// Settings tab at bottom of dock shelf
-	settingsTabY := b.Min.Y + h - 48
-	settingsTabRect := geometry.NewRect(tabStartX+2, settingsTabY, tabBarWidth-14, 34)
-	settingsBg := widget.RGBA8(36, 46, 66, 220)
-	if s.showSettings {
-		settingsBg = widget.RGBA8(54, 70, 98, 230)
-	}
-	canvas.DrawRoundRect(settingsTabRect, settingsBg, 8)
-	canvas.StrokeRoundRect(settingsTabRect, widget.RGBA8(255, 255, 255, 45), 8, 1.0)
-	setTxtRect := geometry.NewRect(tabStartX+4, settingsTabY+9, tabBarWidth-18, 16)
-	canvas.DrawText("⚙ Settings", setTxtRect, 10, widget.RGBA8(230, 240, 255, 255), true, widget.TextAlignCenter)
-	if s.update.Version != "" {
-		drawUpdateDot(canvas, geometry.Pt(settingsTabRect.Max.X-9, settingsTabRect.Min.Y+9))
-	}
+	// Board and Settings buttons at the bottom of the dock shelf
+	drawBoardButton(canvas, shelfBoardButtonRect(tabStartX, h).TranslateXY(0, b.Min.Y), s.showBoard, s.hoveredBoard)
+	drawSettingsIconButton(canvas, shelfSettingsButtonRect(tabStartX, h).TranslateXY(0, b.Min.Y), s.showSettings, s.hoveredSettings, s.update.Version != "")
 
 	// Overlays (if active)
 	if s.showStatus {
@@ -1799,6 +1793,9 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	} else if s.showSettings {
 		cardRect := geometry.NewRect(cardStartX, b.Min.Y+8, cardAreaWidth, h-16)
 		v.drawSettingsOverlay(ctx, canvas, cardRect, s)
+	} else if s.showBoard {
+		cardRect := geometry.NewRect(cardStartX, b.Min.Y+8, cardAreaWidth, h-16)
+		v.drawBoard(canvas, cardRect, s)
 	}
 
 	// Toast Notification
@@ -2076,7 +2073,17 @@ func (v *AppView) Event(ctx widget.Context, e event.Event) bool {
 
 		v.mu.Lock()
 		st := v.state
+		boardOpen := v.showBoard
+		dockSide := v.dockSide
 		v.mu.Unlock()
+
+		if st == window.StateExpanded && boardOpen {
+			if r := expandedCardRect(dockSide); r.Contains(ev.Position) {
+				v.handleBoardWheel(r, ev.Position, ev.Delta.Y)
+				v.MarkNeedsLayout()
+				return true
+			}
+		}
 
 		if st == window.StateFan || st == window.StateExpanded {
 			tabHeight := float32(62)
@@ -2215,14 +2222,20 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 		prevHoverTab := v.hoveredTabIdx
 		prevHoverSet := v.hoveredSettings
 		prevHoverStat := v.hoveredStatus
+		prevHoverBoard := v.hoveredBoard
 		v.mu.Unlock()
 
 		newHoverTab := -1
 		newHoverSet := false
 		newHoverStat := false
+		newHoverBoard := false
 
 		if pos.Y >= b.Min.Y+h-44 {
-			newHoverSet = true
+			if pos.X < fanSettingsButtonRect(w, h).Min.X-2 {
+				newHoverBoard = true
+			} else {
+				newHoverSet = true
+			}
 		} else {
 			tabMinY := b.Min.Y + float32(60)
 			tabMaxY := b.Min.Y + h - float32(50)
@@ -2242,10 +2255,11 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 			}
 		}
 
-		if newHoverTab != prevHoverTab || newHoverSet != prevHoverSet || newHoverStat != prevHoverStat {
+		if newHoverTab != prevHoverTab || newHoverSet != prevHoverSet || newHoverStat != prevHoverStat || newHoverBoard != prevHoverBoard {
 			v.mu.Lock()
 			v.hoveredSettings = newHoverSet
 			v.hoveredStatus = newHoverStat
+			v.hoveredBoard = newHoverBoard
 			v.mu.Unlock()
 			v.setHoveredTab(newHoverTab)
 			v.MarkNeedsLayout()
@@ -2262,13 +2276,17 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 		prevHoverTab := v.hoveredTabIdx
 		prevHoverSet := v.hoveredSettings
 		prevHoverStat := v.hoveredStatus
+		prevHoverBoard := v.hoveredBoard
 		dockSide := v.dockSide
 		showStatus := v.showStatus
+		showBoard := v.showBoard
 		v.mu.Unlock()
 
 		newHoverTab := -1
 		newHoverSet := false
 		newHoverStat := false
+		newHoverBoard := false
+		boardChanged := showBoard && v.handleBoardHover(expandedCardRect(dockSide), pos)
 
 		tabBarWidth := float32(110)
 		tabStartX := b.Min.X + w - tabBarWidth
@@ -2283,9 +2301,10 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 			}
 		}
 
-		settingsTabRect := geometry.NewRect(tabStartX+2, b.Min.Y+h-48, tabBarWidth-14, 34)
-		if settingsTabRect.Contains(pos) {
+		if shelfSettingsButtonRect(tabStartX, h).Contains(pos) {
 			newHoverSet = true
+		} else if shelfBoardButtonRect(tabStartX, h).Contains(pos) {
+			newHoverBoard = true
 		} else if !newHoverStat && !showStatus {
 			filtered := v.getFilteredIssues()
 			tabMinY := b.Min.Y + float32(44)
@@ -2305,10 +2324,11 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 			}
 		}
 
-		if newHoverTab != prevHoverTab || newHoverSet != prevHoverSet || newHoverStat != prevHoverStat {
+		if boardChanged || newHoverTab != prevHoverTab || newHoverSet != prevHoverSet || newHoverStat != prevHoverStat || newHoverBoard != prevHoverBoard {
 			v.mu.Lock()
 			v.hoveredSettings = newHoverSet
 			v.hoveredStatus = newHoverStat
+			v.hoveredBoard = newHoverBoard
 			v.mu.Unlock()
 			v.setHoveredTab(newHoverTab)
 			v.MarkNeedsLayout()
@@ -2353,6 +2373,7 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 	allIssues := v.issues
 	showSettings := v.showSettings
 	showStatus := v.showStatus
+	showBoard := v.showBoard
 	statusEnabled := v.config.StatusCheckEnabled
 	scrollY := v.scrollY
 	activeIdx := v.activeIdx
@@ -2433,9 +2454,12 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 			return true
 		}
 
-		settingsTabRect := geometry.NewRect(b.Min.X+7, b.Min.Y+h-42, w-14, 34)
-		if settingsTabRect.Contains(pos) {
+		if fanSettingsButtonRect(w, h).Contains(pos) {
 			v.OpenSettings()
+			return true
+		}
+		if fanBoardButtonRect(w, h).Contains(pos) {
+			v.OpenBoard()
 			return true
 		}
 
@@ -2506,9 +2530,12 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		}
 	}
 
-	settingsTabRect := geometry.NewRect(tabStartX+2, b.Min.Y+h-48, tabBarWidth-14, 34)
-	if settingsTabRect.Contains(pos) {
+	if shelfSettingsButtonRect(tabStartX, h).Contains(pos) {
 		v.ToggleSettings()
+		return true
+	}
+	if shelfBoardButtonRect(tabStartX, h).Contains(pos) {
+		v.ToggleBoard()
 		return true
 	}
 
@@ -2528,7 +2555,7 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 				if origIdx < 0 {
 					return true
 				}
-				if activeIdx == origIdx && !showSettings && !showStatus {
+				if activeIdx == origIdx && !showSettings && !showStatus && !showBoard {
 					v.SetState(window.StateFan)
 					return true
 				}
@@ -2623,11 +2650,19 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 		return v.handleSettingsClick(r, pos)
 	}
 
+	if showBoard {
+		r := geometry.NewRect(cardStartX, b.Min.Y+8, cardAreaWidth, h-16)
+		return v.handleBoardClick(r, pos)
+	}
+
 	return false
 }
 
 func (v *AppView) handleKey(ev *event.KeyEvent) bool {
-	if ev.Key == event.KeyEscape {
+	// Cmd+W closes like Escape.
+	cmdW := (ev.Modifiers().Has(event.ModSuper) || ev.Modifiers().Has(event.ModCtrl)) &&
+		(ev.Key == event.KeyW || ev.Rune == 'w' || ev.Rune == 'W')
+	if ev.Key == event.KeyEscape || cmdW {
 		v.mu.Lock()
 		st := v.state
 		searchQ := v.searchQuery
@@ -2669,6 +2704,7 @@ func (v *AppView) handleKey(ev *event.KeyEvent) bool {
 	st := v.state
 	showSettings := v.showSettings
 	showStatus := v.showStatus
+	showBoard := v.showBoard
 	activeField := v.activeField
 	v.mu.Unlock()
 
@@ -2696,12 +2732,18 @@ func (v *AppView) handleKey(ev *event.KeyEvent) bool {
 		return true
 	}
 
+	// Cmd+B: Toggle the board
+	if isCmdOrCtrl && !showSettings && (ev.Key == event.KeyB || ev.Rune == 'b' || ev.Rune == 'B') {
+		v.ToggleBoard()
+		return true
+	}
+
 	// Active ticket actions (when not editing settings or viewing status)
 	if !showSettings && !showStatus && (st == window.StateFan || st == window.StateExpanded) {
 		filtered := v.getFilteredIssues()
 
 		// Arrow Up/Down navigation
-		if (ev.Key == event.KeyUp || ev.Key == event.KeyDown) && len(filtered) > 0 {
+		if (ev.Key == event.KeyUp || ev.Key == event.KeyDown) && len(filtered) > 0 && !showBoard {
 			delta := 1
 			if ev.Key == event.KeyUp {
 				delta = -1
@@ -2810,7 +2852,7 @@ func (v *AppView) handleKey(ev *event.KeyEvent) bool {
 	// when no field is focused after switching sections.
 	if showSettings && !isCmdOrCtrl && (ev.Key == event.KeyTab || ev.Key == event.KeyEnter) {
 		v.mu.Lock()
-		if v.settingsSection == settingsSystem {
+		if v.settingsSection == settingsSystem || v.settingsSection == settingsShortcuts {
 			v.mu.Unlock() // no text fields on this page
 			return true
 		}
