@@ -679,10 +679,14 @@ func TestAppViewClickAndHoverDetails(t *testing.T) {
 		t.Errorf("expected clicking tab in Fan to expand to StateExpanded, got %v", view.state)
 	}
 
-	// 4. Expanded State Rail Clicks (Settings tab at x=700, y=550)
+	// 4. Expanded State Rail Clicks (Board button at x=700, gear at x=750, y=550)
 	view.SetBounds(geometry.NewRect(0, 0, 780, 580))
 	view.Draw(ctx, canvas)
 	view.handleClick(geometry.Pt(700, 550))
+	if !view.IsBoardOpen() {
+		t.Errorf("expected clicking the board button in the rail to open the board")
+	}
+	view.handleClick(geometry.Pt(750, 550))
 	view.mu.Lock()
 	showSettings = view.showSettings
 	view.mu.Unlock()

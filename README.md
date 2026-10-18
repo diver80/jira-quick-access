@@ -6,7 +6,7 @@ No dock clutter, no window to manage. Slide the pointer to the right edge and th
 
 📥 **[Release history & downloads (Confluence)](https://avono.atlassian.net/wiki/spaces/~557058ea22d0f92e8646e397b6334abc9884fd/pages/2098888731/App+Jira+Quick+Access)**
 
-Current source version: **1.1.0**. Build outputs are generated locally under `dist/` and are not committed to Git. See Confluence for binary publication status.
+Current source version: **1.2.0**. Build outputs are generated locally under `dist/` and are not committed to Git. See Confluence for binary publication status.
 
 > [!NOTE]
 > **Platform Support**: Currently, **only the macOS (Darwin) version is actively tested and verified** (with native Cocoa edge docking, Retina multi-resolution icons, and embedded WebKit). Windows and Linux builds are experimental cross-compilations and not yet thoroughly tested.
@@ -76,6 +76,7 @@ Standard macOS clipboard shortcuts dispatch natively throughout embedded WebView
 | `⌘A` | Select all |
 | `⌘Z` | Undo |
 | `⌥⌘J` | Global hotkey: open the ticket list with search focused from any app (press again to close) |
+| `⌘B` | Open or close the board |
 | `⌘O` | Open the selected ticket in the browser |
 | `⌘⇧C` | Copy a Git branch name for the selected ticket (`feature/OPS-12-fix-login-timeout`) |
 | `Esc` / `⌘W` | Close expanded ticket view back to tabs, or collapse Fan deck to Rest capsule |
@@ -85,6 +86,7 @@ Standard macOS clipboard shortcuts dispatch natively throughout embedded WebView
 ### 🧰 Ticket Panel, Notifications & Updates
 - **Ticket header**: The panel shows the ticket key and summary with **Copy key**, **Copy link**, **Copy branch** and **Open ↗** (browser) actions.
 - **Notifications**: After each refresh, macOS notifications announce newly assigned tickets and status changes. Changes to tickets you opened in the panel during the last 15 minutes are skipped; clicking a notification opens the ticket.
+- **Board**: The **Board** button in the fan (or `⌘B`) shows the same tickets — configured JQL, instance filter and search — in three read-only columns by Jira status category: *To Do*, *In Progress*, *Done*. Click a card to open the ticket.
 - **Ticket order**: Jira order (per instance JQL), last updated, priority or status.
 - **Sync errors per instance**: If one Jira site fails, its tickets stay visible from the last refresh and its beacon turns red; the other sites keep updating.
 - **Update check**: Once a day the app asks GitHub for the latest release and shows a badge in Settings when a newer version is available.
@@ -131,10 +133,10 @@ The bundled `build.sh` script automates cross-compilation, icon packaging, and d
 
 Generated artifacts are placed in `dist/`:
 - `dist/osx.noindex/Jira Quick Access.app` (macOS Universal 2 App Bundle with Retina `AppIcon.icns`)
-- `dist/osx/Jira Quick Access-v1.1.0-macOS-Universal.dmg` (Drag-and-Drop Disk Image Installer)
-- `dist/osx/JiraQuickAccess-v1.1.0-macOS-Universal.tar.gz`
-- `dist/win/jira-quick-access-v1.1.0-windows-{amd64,arm64}.zip`
-- `dist/lin/jira-quick-access-v1.1.0-linux-{amd64,arm64}.tar.gz`
+- `dist/osx/Jira Quick Access-v1.2.0-macOS-Universal.dmg` (Drag-and-Drop Disk Image Installer)
+- `dist/osx/JiraQuickAccess-v1.2.0-macOS-Universal.tar.gz`
+- `dist/win/jira-quick-access-v1.2.0-windows-{amd64,arm64}.zip`
+- `dist/lin/jira-quick-access-v1.2.0-linux-{amd64,arm64}.tar.gz`
 
 ### 🍎 How to Install & Launch on macOS:
 
@@ -158,7 +160,7 @@ brew upgrade --cask jira-quick-access
 Run `./build.sh install`. This compiles Universal 2 binaries, creates the `.app` bundle, installs it directly into `/Applications/`, and clears quarantine flags.
 
 #### Option C: Standard macOS DMG Installer
-Download `Jira.Quick.Access-v1.1.0-macOS-Universal.dmg` from [GitHub Releases](https://github.com/diver80/jira-quick-access/releases), open the `.dmg` in Finder, and drag the **Jira Quick Access** icon onto the **Applications** folder shortcut.
+Download `Jira.Quick.Access-v1.2.0-macOS-Universal.dmg` from [GitHub Releases](https://github.com/diver80/jira-quick-access/releases), open the `.dmg` in Finder, and drag the **Jira Quick Access** icon onto the **Applications** folder shortcut.
 
 ### 🚀 Launching & Autostart
 1. **Launch**: Press `⌘ + Space`, type `Jira Quick Access`, and hit `Enter`.
