@@ -35,5 +35,6 @@ over the current `0600` file. With a Developer ID the access rule stays valid ac
 ## Ideas
 
 - Evaluate [mygo](https://github.com/egoist/mygo) as an alternative UI stack (spike).
-- Comment notifications (needs one extra request per changed ticket).
+- Notifications for every new comment (today only @mentions notify; all comments are in the Changes tab).
+- Changes tab: older edited comments beyond the newest 50 of a ticket are not detected.
 - Configurable global hotkey (currently fixed to ⌥⌘J).

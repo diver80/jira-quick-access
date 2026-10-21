@@ -172,3 +172,29 @@ func ExecuteMockTransition(issueKey, transitionID string) error {
 	}
 	return fmt.Errorf("issue %s not found", issueKey)
 }
+
+// GetMockChanges returns a fixed set of changelog entries for demo mode. IDs are
+// stable, so repeated checks do not add them again.
+func GetMockChanges(instanceID string) []ChangeEntry {
+	now := time.Now()
+	base := func(key, summary string) ChangeEntry {
+		return ChangeEntry{InstanceID: instanceID, IssueKey: key, Summary: summary}
+	}
+	at := func(d time.Duration) time.Time { return now.Add(-d).Truncate(time.Minute) }
+
+	e1 := base("PROJ-102", "Implement OAuth PKCE Flow for Edge Rail")
+	e1.ID, e1.Kind, e1.Author, e1.At = "demo:1", ChangeComment, "Maria Keller", at(8*time.Minute)
+	e1.Text, e1.Mentioned = "@Demo User could you double-check the redirect URI for the desktop client? The callback fails on the DC test instance.", true
+	e2 := base("PROJ-102", "Implement OAuth PKCE Flow for Edge Rail")
+	e2.ID, e2.Kind, e2.Author, e2.At = "demo:2", ChangeStatus, "Maria Keller", at(35*time.Minute)
+	e2.Field, e2.From, e2.To = "Status", "To Do", "In Progress"
+	e3 := base("PROJ-98", "Fix race condition in token poller background loop")
+	e3.ID, e3.Kind, e3.Author, e3.At = "demo:3", ChangeField, "Jonas Weber", at(2*time.Hour)
+	e3.Field, e3.From, e3.To = "assignee", "Jonas Weber", "Demo User"
+	e4 := base("PROJ-98", "Fix race condition in token poller background loop")
+	e4.ID, e4.Kind, e4.Author, e4.At, e4.Own = "demo:4", ChangeCommentEdited, "Demo User", at(3*time.Hour), true
+	e4.Text = "Reproduced with 200 parallel refreshes; the mutex around the token cache fixes it."
+	e5 := base("PROJ-77", "Update documentation for multi-instance setup")
+	e5.ID, e5.Kind, e5.At = "demo:5", ChangeAdded, at(26*time.Hour)
+	return []ChangeEntry{e1, e2, e3, e4, e5}
+}

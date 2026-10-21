@@ -23,7 +23,7 @@ var shortcutGroups = []shortcutGroup{
 		{[]string{"↑", "↓"}, "Previous / next ticket"},
 		{[]string{"Type"}, "Search tickets (fan)"},
 		{[]string{"⌘K", "⌘F"}, "Focus search"},
-		{[]string{"⌘B"}, "Open or close the board"},
+		{[]string{"⌘B", "⌘L"}, "Board / changes tab"},
 		{[]string{"⌘O"}, "Open ticket in browser"},
 		{[]string{"⌘C"}, "Copy ticket key"},
 		{[]string{"⌘⇧C"}, "Copy Git branch name"},

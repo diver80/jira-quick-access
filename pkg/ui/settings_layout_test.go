@@ -28,7 +28,7 @@ func TestSettingsLayoutVisibleControlsDoNotOverlap(t *testing.T) {
 							controls = append(controls, l.fields[field-1])
 						}
 						if section == settingsInstances {
-							controls = append(controls, l.addInstance, l.importEnv, l.testConnection)
+							controls = append(controls, l.addInstance, l.importEnv, l.testConnection, l.instanceChanges)
 							if count > 1 {
 								controls = append(controls, l.deleteInstance)
 							}

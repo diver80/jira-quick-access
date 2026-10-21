@@ -15,6 +15,8 @@ type InstanceConfig struct {
 	APIToken string `json:"api_token"`
 	JQLQuery string `json:"jql_query"`
 	Color    string `json:"color,omitempty"` // User-defined profile accent color (hex string)
+	// ChangesDisabled turns off the changelog (changes search, comments, filter entries) for this instance.
+	ChangesDisabled bool `json:"changes_disabled,omitempty"`
 }
 
 // MaskedAPIToken returns a masked representation of the instance API token for logging and UI display.
@@ -49,6 +51,7 @@ type Config struct {
 	Notifications      bool             `json:"notifications"`        // Notify about new tickets and status changes (default: true)
 	UpdateCheck        bool             `json:"update_check"`         // Look for new releases on GitHub once a day (default: true)
 	SortMode           string           `json:"sort_mode,omitempty"`  // Ticket order: "" (Jira), "updated", "priority" or "status"
+	ChangesHideOwn     bool             `json:"changes_hide_own"`     // Changelog: hide changes made by the API token's user
 }
 
 // Ticket orders offered in the settings; the empty mode keeps Jira's own order.

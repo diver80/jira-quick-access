@@ -208,6 +208,7 @@ func LoadConfig() Config {
 		cfg.Notifications = saved.Notifications || !bytes.Contains(data, []byte("\"notifications\""))
 		cfg.UpdateCheck = saved.UpdateCheck || !bytes.Contains(data, []byte("\"update_check\""))
 		cfg.SortMode = saved.SortMode
+		cfg.ChangesHideOwn = saved.ChangesHideOwn
 	} else {
 		// First launch: No config.json exists on disk yet.
 		// Check if .env supplies credentials; otherwise enable Demo Mode for out-of-the-box preview.

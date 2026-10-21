@@ -20,6 +20,9 @@ type Client struct {
 	config     Config
 	httpClient *http.Client
 	mu         sync.RWMutex
+
+	idMu       sync.Mutex
+	identities map[string]userIdentity // API token user per instance credentials
 }
 
 // NewClient creates a new Jira client.

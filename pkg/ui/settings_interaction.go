@@ -109,6 +109,16 @@ func (v *AppView) handleSettingsClick(r geometry.Rect, pos geometry.Point) bool 
 				return true
 			}
 		}
+		if l.instanceChanges.Contains(pos) {
+			v.mu.Lock()
+			if i := v.selectedInstIdx; i >= 0 && i < len(v.config.Instances) {
+				v.config.Instances[i].ChangesDisabled = !v.config.Instances[i].ChangesDisabled
+				v.statusMsg = "Changelog setting changed. Use Save all settings to keep it."
+			}
+			v.mu.Unlock()
+			v.MarkNeedsLayout()
+			return true
+		}
 		if l.importEnv.Contains(pos) {
 			v.importSettingsEnvironment()
 			return true

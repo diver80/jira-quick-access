@@ -251,6 +251,7 @@ func (v *AppView) applyFetchResultLocked(res jira.FetchResult) (changes []issueC
 				comparable[id] = true
 			}
 		}
+		v.recordMembershipLocked(v.issues, merged, comparable)
 		for _, c := range diffIssues(v.issues, merged, comparable) {
 			if !c.isNew && time.Since(v.viewedAt[issueID(c.issue)]) < recentlyViewedWindow {
 				continue

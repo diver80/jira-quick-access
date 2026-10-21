@@ -121,6 +121,9 @@ func (v *AppView) drawInstanceSettings(canvas widget.Canvas, l settingsLayout, s
 		canvas.DrawCircle(center, 8, preset.Color)
 	}
 	settingsText(canvas, rect(278, 429, 100, 16), current, 10, false)
+	changesOn := s.selectedInstIdx >= 0 && s.selectedInstIdx < len(s.instances) && !s.instances[s.selectedInstIdx].ChangesDisabled
+	settingsText(canvas, geometry.NewRect(l.instanceChanges.Min.X, 405+r.Min.Y, l.instanceChanges.Width(), 14), "Changes tab (changelog & comments)", 10, false)
+	settingsButton(canvas, l.instanceChanges, onOff("Changelog", changesOn), changesOn)
 	settingsButton(canvas, l.importEnv, "Import .env", false)
 	settingsButton(canvas, l.testConnection, "Test connection", false)
 	if len(s.instances) > 1 {

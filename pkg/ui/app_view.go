@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -102,6 +103,17 @@ type AppView struct {
 	hoveredBoardCard string // issueID of the hovered card
 	hoveredBoard     bool   // board button hovered (fan and dock shelf)
 
+	// Changes tab of the board overlay (see changes.go).
+	changelog         *jira.ChangeLog
+	changesBusy       atomic.Bool // a changes check is running
+	boardTab          int
+	changesScroll     float32
+	hoveredChange     string               // instance ID + "/" + entry ID
+	changesReadAt     map[string]time.Time // read marks before the Changes tab was opened
+	ticketURLOverride string               // next ticket view loads this URL (e.g. a focused comment)
+	changesCache      *changesView
+	membershipJQL     map[string]string // base URL + JQL per instance at the last refresh
+
 	// Callbacks
 	onRedraw       func()
 	onResize       func(w, h int)
@@ -174,6 +186,15 @@ type appViewStateSnapshot struct {
 	boardScroll       [boardColumnCount]float32
 	hoveredBoardCard  string
 	hoveredBoard      bool
+	boardTab          int
+	changes           []jira.ChangeEntry
+	changeRows        []changeRow
+	changesTotal      float32
+	changesScroll     float32
+	hoveredChange     string
+	changesReadAt     map[string]time.Time
+	changesUnread     int
+	changesOff        bool // changelog turned off for every instance in the board's scope
 }
 
 func NewAppView(
@@ -218,6 +239,7 @@ func NewAppView(
 		cancel:             cancel,
 		cacheDirty:         true,
 		viewedAt:           map[string]time.Time{},
+		changelog:          jira.LoadChangeLog(),
 	}
 
 	if window.DefaultManager != nil {
@@ -701,6 +723,13 @@ func (v *AppView) snapshot() appViewStateSnapshot {
 	monitors := make([]window.MonitorInfo, len(v.monitors))
 	copy(monitors, v.monitors)
 
+	cv := v.changesViewLocked()
+	var changes []jira.ChangeEntry
+	var changeRows []changeRow
+	if v.showBoard && v.boardTab == boardTabChanges && v.state == window.StateExpanded {
+		changes, changeRows = cv.entries, cv.rows
+	}
+
 	return appViewStateSnapshot{
 		bounds:            v.Bounds(),
 		state:             v.state,
@@ -751,6 +780,15 @@ func (v *AppView) snapshot() appViewStateSnapshot {
 		boardScroll:       v.boardScroll,
 		hoveredBoardCard:  v.hoveredBoardCard,
 		hoveredBoard:      v.hoveredBoard,
+		boardTab:          v.boardTab,
+		changes:           changes,
+		changeRows:        changeRows,
+		changesTotal:      cv.total,
+		changesScroll:     v.changesScroll,
+		hoveredChange:     v.hoveredChange,
+		changesReadAt:     maps.Clone(v.changesReadAt),
+		changesUnread:     cv.unread,
+		changesOff:        len(v.changesScopeLocked()) == 0,
 	}
 }
 
@@ -855,11 +893,13 @@ func (v *AppView) loadActiveTicketInMobileView() {
 	iss := v.issues[v.activeIdx]
 	cfg := v.config
 	v.viewedAt[issueID(iss)] = time.Now()
+	override := v.ticketURLOverride
+	v.ticketURLOverride = ""
 	v.mu.Unlock()
 
 	url := ""
 	if !cfg.DemoMode {
-		url = ticketURL(iss, cfg.BaseURL)
+		url = cmp.Or(override, ticketURL(iss, cfg.BaseURL))
 	}
 	window.SetTicketHeader(iss.Key, iss.Summary, url, branchName(cfg.BranchPrefix, iss))
 	if url != "" {
@@ -1143,6 +1183,7 @@ func (v *AppView) RefreshIssues() {
 			notifyChanges(changes)
 		}
 		v.postToUI(v.MarkNeedsLayout)
+		v.RefreshChanges()
 	}()
 }
 
@@ -1623,7 +1664,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		canvas.DrawLine(geometry.Pt(b.Min.X+10, dividerY), geometry.Pt(b.Min.X+w-10, dividerY), widget.RGBA8(255, 255, 255, 55), 1.0)
 
 		// 8. Board and Settings buttons
-		drawBoardButton(canvas, fanBoardButtonRect(w, h).Translate(b.Min), false, s.hoveredBoard)
+		drawBoardButton(canvas, fanBoardButtonRect(w, h).Translate(b.Min), false, s.hoveredBoard, s.changesUnread > 0)
 		drawSettingsIconButton(canvas, fanSettingsButtonRect(w, h).Translate(b.Min), false, s.hoveredSettings, s.update.Version != "")
 		return
 	}
@@ -1783,7 +1824,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 	canvas.DrawLine(geometry.Pt(tabStartX+8, dividerY), geometry.Pt(tabStartX+tabBarWidth-12, dividerY), widget.RGBA8(255, 255, 255, 55), 1.0)
 
 	// Board and Settings buttons at the bottom of the dock shelf
-	drawBoardButton(canvas, shelfBoardButtonRect(tabStartX, h).TranslateXY(0, b.Min.Y), s.showBoard, s.hoveredBoard)
+	drawBoardButton(canvas, shelfBoardButtonRect(tabStartX, h).TranslateXY(0, b.Min.Y), s.showBoard, s.hoveredBoard, s.changesUnread > 0)
 	drawSettingsIconButton(canvas, shelfSettingsButtonRect(tabStartX, h).TranslateXY(0, b.Min.Y), s.showSettings, s.hoveredSettings, s.update.Version != "")
 
 	// Overlays (if active)
@@ -2735,6 +2776,12 @@ func (v *AppView) handleKey(ev *event.KeyEvent) bool {
 	// Cmd+B: Toggle the board
 	if isCmdOrCtrl && !showSettings && (ev.Key == event.KeyB || ev.Rune == 'b' || ev.Rune == 'B') {
 		v.ToggleBoard()
+		return true
+	}
+
+	// Cmd+L: Toggle the changes (log) tab
+	if isCmdOrCtrl && !showSettings && (ev.Key == event.KeyL || ev.Rune == 'l' || ev.Rune == 'L') {
+		v.ToggleChanges()
 		return true
 	}
 
