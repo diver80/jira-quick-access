@@ -35,6 +35,8 @@ type InstanceChanges struct {
 	Watermark time.Time
 	// Backfill is set for the first check, whose entries are history rather than news.
 	Backfill bool
+	// Complete is false when the request cap or errors left tickets for the next check.
+	Complete bool
 }
 
 // ChangesResult is the outcome of one changes check across all instances.
@@ -88,15 +90,21 @@ type deltaIssue struct {
 	Summary string
 	Updated time.Time
 	History []changelogHistory
+	// Truncated is set when the search returned only part of the changelog.
+	Truncated bool
 }
 
 func (c *Client) fetchInstanceChanges(ctx context.Context, inst InstanceConfig, since, now time.Time) (InstanceChanges, error) {
 	baseURL := strings.TrimRight(strings.TrimSpace(inst.BaseURL), "/")
 	auth := authHeaderFor(inst.Email, inst.APIToken)
 	out := InstanceChanges{Watermark: now}
-	if since.IsZero() || now.Sub(since) > changeBackfill {
-		since = now.Add(-changeBackfill)
+	// Only the very first check is a look-back. After a longer break the window is
+	// capped, but what happened meanwhile is still news.
+	if since.IsZero() {
 		out.Backfill = true
+	}
+	if now.Sub(since) > changeBackfill {
+		since = now.Add(-changeBackfill)
 	}
 	from := since.Add(-changeOverlap)
 
@@ -114,21 +122,17 @@ func (c *Client) fetchInstanceChanges(ctx context.Context, inst InstanceConfig, 
 	}
 	slices.SortStableFunc(issues, func(a, b deltaIssue) int { return a.Updated.Compare(b.Updated) })
 
-	for _, iss := range issues {
-		base := ChangeEntry{InstanceID: inst.ID, BaseURL: baseURL, IssueKey: iss.Key, Summary: iss.Summary}
-		for _, h := range iss.History {
-			if parseJiraTime(h.Created).After(from) {
-				out.Entries = append(out.Entries, historyEntries(h, base, me)...)
-			}
-		}
-	}
-
-	// Comments need one request per ticket; fetch the oldest changes first so a
-	// capped check can resume exactly where it stopped.
+	// Comments (and changelogs the search cut short) need one request per ticket;
+	// fetch the oldest changes first so a capped check can resume where it stopped.
 	todo := issues
 	if len(todo) > maxCommentFetches {
 		todo = issues[:maxCommentFetches]
 		out.Watermark = resumeAt(out.Watermark, since, issues[maxCommentFetches])
+	}
+	for _, iss := range issues[len(todo):] {
+		if !iss.Truncated {
+			out.Entries = append(out.Entries, historyChanges(iss, inst.ID, baseURL, me, from)...)
+		}
 	}
 	comments := make([][]ChangeEntry, len(todo))
 	errs := make([]error, len(todo))
@@ -140,8 +144,14 @@ func (c *Client) fetchInstanceChanges(ctx context.Context, inst InstanceConfig, 
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			if iss.Truncated {
+				if iss.History, errs[i] = c.fetchLatestHistories(ctx, baseURL, auth, iss.Key); errs[i] != nil {
+					return
+				}
+			}
 			base := ChangeEntry{InstanceID: inst.ID, BaseURL: baseURL, IssueKey: iss.Key, Summary: iss.Summary}
 			comments[i], errs[i] = c.fetchCommentEntries(ctx, baseURL, auth, base, me, from)
+			comments[i] = append(historyChanges(iss, inst.ID, baseURL, me, from), comments[i]...)
 		}(i, iss)
 	}
 	wg.Wait()
@@ -154,7 +164,70 @@ func (c *Client) fetchInstanceChanges(ctx context.Context, inst InstanceConfig, 
 		}
 		out.Entries = append(out.Entries, comments[i]...)
 	}
+	out.Complete = out.Watermark.Equal(now)
 	return out, nil
+}
+
+// historyChanges converts the changelog histories of one ticket created after from.
+func historyChanges(iss deltaIssue, instID, baseURL string, me userIdentity, from time.Time) []ChangeEntry {
+	base := ChangeEntry{InstanceID: instID, BaseURL: baseURL, IssueKey: iss.Key, Summary: iss.Summary}
+	var out []ChangeEntry
+	for _, h := range iss.History {
+		if parseJiraTime(h.Created).After(from) {
+			out = append(out, historyEntries(h, base, me)...)
+		}
+	}
+	return out
+}
+
+// fetchLatestHistories loads the newest changelog page of a ticket whose search
+// result held only part of it: the paginated changelog API on Cloud, the full
+// changelog of the issue on Data Center.
+func (c *Client) fetchLatestHistories(ctx context.Context, baseURL, auth, key string) ([]changelogHistory, error) {
+	k := url.PathEscape(key)
+	cloudURL := fmt.Sprintf("%s/rest/api/3/issue/%s/changelog", baseURL, k)
+	var page struct {
+		Total  int                `json:"total"`
+		Values []changelogHistory `json:"values"`
+	}
+	status, body, _, err := c.doFirstAvailable(ctx, http.MethodGet, []string{cloudURL + "?maxResults=1"}, auth, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusOK {
+		if err := json.Unmarshal(body, &page); err != nil {
+			return nil, err
+		}
+		start := max(0, page.Total-searchPageSize)
+		status, body, _, err = c.doFirstAvailable(ctx, http.MethodGet, []string{fmt.Sprintf("%s?startAt=%d&maxResults=%d", cloudURL, start, searchPageSize)}, auth, nil)
+		if err != nil {
+			return nil, err
+		}
+		if status != http.StatusOK {
+			return nil, fmt.Errorf("HTTP %d on %s: %s", status, cloudURL, errorDetail(body))
+		}
+		page.Values = nil
+		err = json.Unmarshal(body, &page)
+		return page.Values, err
+	}
+	if !isMissingEndpoint(status) {
+		return nil, fmt.Errorf("HTTP %d on %s: %s", status, cloudURL, errorDetail(body))
+	}
+	dcURL := fmt.Sprintf("%s/rest/api/2/issue/%s?fields=updated&expand=changelog", baseURL, k)
+	status, body, _, err = c.doFirstAvailable(ctx, http.MethodGet, []string{dcURL}, auth, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d on %s: %s", status, dcURL, errorDetail(body))
+	}
+	var issue struct {
+		Changelog struct {
+			Histories []changelogHistory `json:"histories"`
+		} `json:"changelog"`
+	}
+	err = json.Unmarshal(body, &issue)
+	return issue.Changelog.Histories, err
 }
 
 // resumeAt moves the watermark back so the next check includes iss again. It only
@@ -249,6 +322,8 @@ func (c *Client) searchDelta(ctx context.Context, baseURL, auth, jql string) ([]
 					Updated string `json:"updated"`
 				} `json:"fields"`
 				Changelog struct {
+					StartAt   int                `json:"startAt"`
+					Total     int                `json:"total"`
 					Histories []changelogHistory `json:"histories"`
 				} `json:"changelog"`
 			} `json:"issues"`
@@ -262,6 +337,9 @@ func (c *Client) searchDelta(ctx context.Context, baseURL, auth, jql string) ([]
 				Summary: raw.Fields.Summary,
 				Updated: parseJiraTime(raw.Fields.Updated),
 				History: raw.Changelog.Histories,
+				// Which part Jira returns is not documented; when it is not the whole
+				// changelog, load the newest page separately.
+				Truncated: raw.Changelog.Total > len(raw.Changelog.Histories),
 			})
 		}
 		switch {

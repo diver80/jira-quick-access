@@ -224,15 +224,16 @@ func TestChangeLogMergeDedupesPrunesAndCountsUnread(t *testing.T) {
 		return ChangeEntry{ID: id, IssueKey: "A-1", Kind: ChangeComment, At: now.Add(-ago), Own: own}
 	}
 
-	added := l.Merge("i1", []ChangeEntry{e("1", time.Hour, false), e("old", 40*24*time.Hour, false)}, now, true, now)
-	if len(added) != 1 {
+	added, history := l.Merge("i1", InstanceChanges{Entries: []ChangeEntry{e("1", time.Hour, false), e("old", 40*24*time.Hour, false)}, Watermark: now, Backfill: true, Complete: true}, now)
+	if len(added) != 1 || !history {
 		t.Fatalf("entries beyond the retention must be dropped, got %+v", added)
 	}
 	if l.Unread(false) != 0 {
 		t.Fatal("a backfill counts as read")
 	}
-	added = l.Merge("i1", []ChangeEntry{e("1", time.Hour, false), e("2", -time.Second, false), e("3", -2*time.Second, true)}, now.Add(time.Minute), false, now)
-	if len(added) != 2 || added[0].ID != "3" {
+	later := now.Add(time.Second)
+	added, history = l.Merge("i1", InstanceChanges{Entries: []ChangeEntry{e("1", time.Hour, false), e("2", -time.Second, false), e("3", -2*time.Second, true)}, Watermark: now.Add(time.Minute), Complete: true}, later)
+	if len(added) != 2 || added[0].ID != "3" || history {
 		t.Fatalf("expected the two new entries newest first, got %+v", added)
 	}
 	if got := l.Unread(false); got != 2 {
@@ -252,7 +253,7 @@ func TestChangeLogMergeDedupesPrunesAndCountsUnread(t *testing.T) {
 	if w := reopened.Watermarks()["i1"]; !w.Equal(now.Add(time.Minute)) {
 		t.Fatalf("watermark lost: %v", w)
 	}
-	reopened.MarkRead(now.Add(time.Hour), "i1")
+	reopened.MarkRead(later, "i1")
 	if reopened.Unread(false) != 0 {
 		t.Fatal("mark read must clear unread")
 	}
@@ -268,5 +269,86 @@ func TestFetchAllChangesDemoMode(t *testing.T) {
 	ch := res.Instances["demo"]
 	if len(ch.Entries) == 0 || !ch.Backfill {
 		t.Fatalf("demo mode should return the mock changes as a backfill, got %+v", res)
+	}
+}
+
+func TestBackfillContinuationIsHistory(t *testing.T) {
+	l := OpenChangeLog(filepath.Join(t.TempDir(), "c.json"))
+	now := time.Now()
+	entry := func(id string) []ChangeEntry { return []ChangeEntry{{ID: id, At: now.Add(-3 * 24 * time.Hour)}} }
+	// The first check hit the request cap; its continuation is still history.
+	if _, history := l.Merge("i", InstanceChanges{Entries: entry("1"), Backfill: true, Complete: false}, now); !history {
+		t.Fatal("first check is history")
+	}
+	if _, history := l.Merge("i", InstanceChanges{Entries: entry("2"), Complete: true}, now.Add(time.Minute)); !history {
+		t.Fatal("continuation of an incomplete look-back must not be announced")
+	}
+	if l.Unread(false) != 0 {
+		t.Fatal("look-back entries count as read")
+	}
+	if _, history := l.Merge("i", InstanceChanges{Entries: entry("3"), Complete: true}, now.Add(2*time.Minute)); history {
+		t.Fatal("once the look-back is complete, changes are news")
+	}
+}
+
+func TestLongBreakIsNotABackfill(t *testing.T) {
+	now := time.Now()
+	var hits atomic.Int32
+	ts := fakeJira(t, false, now, &hits)
+	defer ts.Close()
+	res, err := NewClient(Config{}).fetchInstanceChanges(context.Background(), InstanceConfig{ID: "i1", BaseURL: ts.URL, APIToken: "tok"}, now.Add(-10*24*time.Hour), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Backfill || !res.Complete || len(res.Entries) != 2 {
+		t.Fatalf("after a long break, recent changes are news: %+v", res)
+	}
+}
+
+func TestStripOrderByIgnoresQuotedText(t *testing.T) {
+	cases := map[string]string{
+		`summary ~ "order by date" AND assignee = currentUser() ORDER BY updated DESC`: `summary ~ "order by date" AND assignee = currentUser()`,
+		`project = X order   by rank`:       `project = X`,
+		`labels = reorder ORDER BY created`: `labels = reorder`,
+		`text ~ 'it\'s order by' `:          `text ~ 'it\'s order by'`,
+	}
+	for in, want := range cases {
+		if got := stripOrderBy(in); got != want {
+			t.Errorf("stripOrderBy(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestTruncatedSearchChangelogLoadsNewestPage(t *testing.T) {
+	now := time.Now()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/myself"):
+			_, _ = io.WriteString(w, `{"accountId":"me"}`)
+		case r.URL.Path == "/rest/api/2/search":
+			// Only an old part of a long changelog is embedded.
+			_, _ = io.WriteString(w, `{"total":1,"issues":[{"key":"A-1","fields":{"updated":"`+jiraStamp(now)+`"},"changelog":{"startAt":0,"total":150,"histories":[]}}]}`)
+		case r.URL.Path == "/rest/api/3/issue/A-1/changelog":
+			if r.URL.Query().Get("maxResults") == "1" {
+				_, _ = io.WriteString(w, `{"total":150,"values":[]}`)
+				return
+			}
+			if r.URL.Query().Get("startAt") != "50" {
+				t.Errorf("expected the newest page, got %s", r.URL.RawQuery)
+			}
+			_, _ = io.WriteString(w, `{"total":150,"values":[{"id":"149","author":{"displayName":"M"},"created":"`+jiraStamp(now.Add(-time.Minute))+`","items":[{"field":"status","fromString":"A","toString":"B"}]}]}`)
+		case strings.HasSuffix(r.URL.Path, "/comment"):
+			_, _ = io.WriteString(w, `{"comments":[]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+	res, err := NewClient(Config{}).fetchInstanceChanges(context.Background(), InstanceConfig{ID: "i", BaseURL: ts.URL, APIToken: "t"}, now.Add(-10*time.Minute), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Entries) != 1 || res.Entries[0].To != "B" {
+		t.Fatalf("expected the status change from the newest changelog page, got %+v", res.Entries)
 	}
 }

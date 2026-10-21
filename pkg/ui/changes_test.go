@@ -12,21 +12,21 @@ import (
 	"jira-quick-access/pkg/window"
 )
 
-// changesView is a board view with its own changelog file and a few entries for
+// newChangesTestView is a board view with its own changelog file and a few entries for
 // instance "a" (unread) and one for instance "b".
-func changesView(t *testing.T) *AppView {
+func newChangesTestView(t *testing.T) *AppView {
 	t.Helper()
 	// Created first so it is removed after view.Close has waited for background saves.
 	dir := t.TempDir()
 	view := boardView(t)
 	log := jira.OpenChangeLog(filepath.Join(dir, "changelog.json"))
 	now := time.Now()
-	log.Merge("a", nil, now.Add(-time.Hour), true, now.Add(-time.Hour))
-	log.Merge("a", []jira.ChangeEntry{
+	log.Merge("a", jira.InstanceChanges{Watermark: now.Add(-time.Hour), Backfill: true, Complete: true}, now.Add(-time.Hour))
+	log.Add("a", []jira.ChangeEntry{
 		{ID: "c:1", IssueKey: "A-2", Summary: "A-2 summary", Kind: jira.ChangeComment, Text: "Bitte Mapping prüfen", Author: "Maria", Mentioned: true, CommentID: "1", BaseURL: "https://jira.test", At: now.Add(-5 * time.Minute)},
 		{ID: "h:1:0", IssueKey: "A-1", Kind: jira.ChangeStatus, From: "To Do", To: "In Progress", Author: "Frank", Own: true, At: now.Add(-10 * time.Minute)},
-	}, time.Time{}, false, now)
-	log.Merge("b", []jira.ChangeEntry{{ID: "h:9:0", IssueKey: "B-1", Kind: jira.ChangeField, Field: "assignee", To: "Maria", At: now}}, time.Time{}, false, now)
+	}, now)
+	log.Add("b", []jira.ChangeEntry{{ID: "h:9:0", IssueKey: "B-1", Kind: jira.ChangeField, Field: "assignee", To: "Maria", At: now}}, now)
 	view.mu.Lock()
 	view.changelog = log
 	view.mu.Unlock()
@@ -59,7 +59,7 @@ func TestMembershipEntriesOnlyForComparableInstances(t *testing.T) {
 }
 
 func TestCmdLOpensChangesForInstanceAndMarksRead(t *testing.T) {
-	view := changesView(t)
+	view := newChangesTestView(t)
 	view.SetState(window.StateFan)
 	if s := view.snapshot(); s.changesUnread != 2 {
 		t.Fatalf("expected 2 unread changes for instance a, got %d", s.changesUnread)
@@ -82,7 +82,7 @@ func TestCmdLOpensChangesForInstanceAndMarksRead(t *testing.T) {
 	if s.changesUnread != 0 {
 		t.Fatalf("opening the tab marks its changes read, still %d unread", s.changesUnread)
 	}
-	if len(s.changes) != 2 || !s.changes[0].At.After(s.changesReadAt["a"]) {
+	if len(s.changes) != 2 || !jira.IsUnread(s.changes[0], s.changesReadAt["a"]) {
 		t.Fatal("this visit must still show the entries as new")
 	}
 
@@ -93,7 +93,7 @@ func TestCmdLOpensChangesForInstanceAndMarksRead(t *testing.T) {
 }
 
 func TestHideMineFiltersOwnChanges(t *testing.T) {
-	view := changesView(t)
+	view := newChangesTestView(t)
 	view.OpenChanges()
 	r := expandedCardRect(window.DockSideRight)
 	view.handleClick(newBoardLayout(r).hideOwn.Center())
@@ -104,7 +104,7 @@ func TestHideMineFiltersOwnChanges(t *testing.T) {
 }
 
 func TestClickingCommentOpensTicketAtComment(t *testing.T) {
-	view := changesView(t)
+	view := newChangesTestView(t)
 	view.OpenChanges()
 	r := expandedCardRect(window.DockSideRight)
 	rows, _ := layoutChangeRows(view.snapshot().changes, time.Now())
@@ -133,10 +133,11 @@ func TestClickingCommentOpensTicketAtComment(t *testing.T) {
 }
 
 func TestChangelogCanBeTurnedOffPerInstance(t *testing.T) {
-	view := changesView(t)
-	view.mu.Lock()
-	view.config.Instances[0].ChangesDisabled = true
-	view.mu.Unlock()
+	view := newChangesTestView(t)
+	// The switch applies once saved, i.e. when the client has the new settings.
+	cfg := view.client.GetConfig()
+	cfg.Instances[0].ChangesDisabled = true
+	view.client.UpdateConfig(cfg)
 
 	view.OpenChanges()
 	s := view.snapshot()
@@ -157,15 +158,72 @@ func TestChangelogCanBeTurnedOffPerInstance(t *testing.T) {
 		}
 	}
 
-	// The settings switch toggles the selected instance.
+	// The settings switch edits the selected instance; nothing changes before Save.
 	view.OpenSettings()
 	view.handleClick(settingsTestCenter(settingsTestLayout(view).instanceChanges))
 	view.mu.Lock()
-	off := view.config.Instances[view.selectedInstIdx].ChangesDisabled
+	edited := view.config.Instances[view.selectedInstIdx].ChangesDisabled
 	sel := view.selectedInstIdx
 	view.mu.Unlock()
-	if sel == 0 && off {
-		t.Fatal("settings switch should turn the changelog back on")
+	if sel != 0 || !edited {
+		t.Fatalf("settings switch should turn the changelog off for instance 0 (selected %d, off %v)", sel, edited)
+	}
+	if view.client.GetConfig().Instances[0].ChangesDisabled != true || view.client.GetConfig().Instances[1].ChangesDisabled {
+		t.Fatal("an unsaved switch must not reach the client")
+	}
+}
+
+func TestUnsavedSwitchDoesNotDropStoredChanges(t *testing.T) {
+	view := newChangesTestView(t)
+	view.mu.Lock()
+	view.config.Instances[0].ChangesDisabled = true // edited in settings, not saved
+	view.mu.Unlock()
+	view.changelog.Retain(view.savedChangesInstances())
+	if len(view.changelog.Entries("a")) == 0 {
+		t.Fatal("entries of an instance must survive until the switch is saved")
+	}
+}
+
+func TestMembershipSkipsInstancesWhoseQueryChanged(t *testing.T) {
+	view := newChangesTestView(t)
+	comparable := map[string]bool{"a": true}
+	view.mu.Lock()
+	defer view.mu.Unlock()
+	view.recordMembershipLocked(nil, nil, comparable) // remembers the current queries
+	cfg := view.client.GetConfig()
+	cfg.Instances[0].JQLQuery = "project = NEW"
+	view.client.UpdateConfig(cfg)
+	view.recordMembershipLocked(nil, []jira.Issue{iss("a", "A-50", "To Do")}, comparable)
+	view.recordMembershipLocked([]jira.Issue{iss("a", "A-50", "To Do")}, []jira.Issue{iss("a", "A-50", "To Do"), iss("a", "A-51", "To Do")}, comparable)
+	keys := map[string]bool{}
+	for _, e := range view.changelog.Entries("a") {
+		keys[e.IssueKey] = true
+	}
+	if keys["A-50"] || !keys["A-51"] {
+		t.Fatalf("the refresh right after a JQL change must not record entries, later ones must: %v", keys)
+	}
+}
+
+func TestLateArrivingEntryIsUnread(t *testing.T) {
+	view := newChangesTestView(t)
+	view.OpenChanges()
+	view.changelog.Add("a", []jira.ChangeEntry{{ID: "late", IssueKey: "A-1", Kind: jira.ChangeComment, At: time.Now().Add(-time.Hour)}}, time.Now())
+	view.mu.Lock()
+	unread := view.unreadChangesLocked()
+	view.mu.Unlock()
+	if unread != 1 {
+		t.Fatalf("an entry about an older event that arrives later is still new, got %d unread", unread)
+	}
+}
+
+func TestManyMentionsAreSummarised(t *testing.T) {
+	var entries []jira.ChangeEntry
+	for i := 0; i < 5; i++ {
+		entries = append(entries, jira.ChangeEntry{Kind: jira.ChangeComment, Mentioned: true})
+	}
+	entries = append(entries, jira.ChangeEntry{Kind: jira.ChangeComment, Mentioned: true, Own: true}, jira.ChangeEntry{Kind: jira.ChangeStatus})
+	if got := len(mentionNotifications(entries)); got != 5 {
+		t.Fatalf("expected 5 mentions to announce, got %d", got)
 	}
 }
 

@@ -17,10 +17,11 @@ const (
 // ChangeLog keeps the changelog entries of all instances on disk next to the
 // configuration (changelog.json). It is safe for concurrent use.
 type ChangeLog struct {
-	mu     sync.Mutex
-	saveMu sync.Mutex // keeps an older snapshot from replacing a newer one on disk
-	path   string
-	data   changeLogFile
+	mu      sync.Mutex
+	saveMu  sync.Mutex // keeps an older snapshot from replacing a newer one on disk
+	path    string
+	data    changeLogFile
+	version uint64 // bumped on every change, for caches of Entries/Unread
 }
 
 type changeLogFile struct {
@@ -29,9 +30,12 @@ type changeLogFile struct {
 }
 
 type instanceChangeLog struct {
-	Watermark time.Time     `json:"watermark"` // "since" of the next changes check
-	ReadAt    time.Time     `json:"read_at"`   // entries up to here count as read
-	Entries   []ChangeEntry `json:"entries"`   // newest first
+	Watermark time.Time `json:"watermark"` // "since" of the next changes check
+	// Backfilling is set while the first check's look-back has not been completed
+	// (it hit the request cap); its continuation is history, not news, too.
+	Backfilling bool          `json:"backfilling,omitempty"`
+	ReadAt      time.Time     `json:"read_at"` // entries that arrived up to here count as read
+	Entries     []ChangeEntry `json:"entries"` // newest first
 }
 
 // LoadChangeLog opens the changelog stored next to the configuration file.
@@ -60,6 +64,13 @@ func (l *ChangeLog) instanceLocked(id string) *instanceChangeLog {
 	return il
 }
 
+// Version changes whenever entries or read marks change.
+func (l *ChangeLog) Version() uint64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.version
+}
+
 // Watermarks returns the "since" value of the next changes check per instance.
 func (l *ChangeLog) Watermarks() map[string]time.Time {
 	l.mu.Lock()
@@ -71,13 +82,33 @@ func (l *ChangeLog) Watermarks() map[string]time.Time {
 	return out
 }
 
-// Merge adds entries of one instance, dropping those already stored, and returns the
-// new ones. A non-zero watermark replaces the stored one. When markRead is set (the
-// first backfill), everything up to now counts as read.
-func (l *ChangeLog) Merge(instID string, entries []ChangeEntry, watermark time.Time, markRead bool, now time.Time) []ChangeEntry {
+// Merge stores the result of a changes check and returns the entries that were not
+// known yet. history reports that they belong to the initial look-back (the first
+// check or its continuation): they are marked read and must not be announced.
+func (l *ChangeLog) Merge(instID string, ch InstanceChanges, now time.Time) (added []ChangeEntry, history bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	il := l.instanceLocked(instID)
+	history = ch.Backfill || il.Backfilling
+	added = l.addLocked(il, instID, ch.Entries, now)
+	if !ch.Watermark.IsZero() {
+		il.Watermark = ch.Watermark
+	}
+	if history {
+		il.Backfilling = !ch.Complete
+		il.ReadAt = now
+	}
+	return added, history
+}
+
+// Add stores entries without touching the watermark (e.g. filter membership changes).
+func (l *ChangeLog) Add(instID string, entries []ChangeEntry, now time.Time) []ChangeEntry {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.addLocked(l.instanceLocked(instID), instID, entries, now)
+}
+
+func (l *ChangeLog) addLocked(il *instanceChangeLog, instID string, entries []ChangeEntry, now time.Time) []ChangeEntry {
 	known := make(map[string]bool, len(il.Entries))
 	for _, e := range il.Entries {
 		known[e.ID] = true
@@ -89,18 +120,14 @@ func (l *ChangeLog) Merge(instID string, entries []ChangeEntry, watermark time.T
 		}
 		known[e.ID] = true
 		e.InstanceID = instID
+		e.Arrived = now
 		added = append(added, e)
 	}
 	il.Entries = append(il.Entries, added...)
 	sortNewestFirst(il.Entries)
 	il.Entries = pruneEntries(il.Entries, now)
-	if !watermark.IsZero() {
-		il.Watermark = watermark
-	}
-	if markRead {
-		il.ReadAt = now
-	}
 	sortNewestFirst(added)
+	l.version++
 	return added
 }
 
@@ -132,7 +159,7 @@ func (l *ChangeLog) Entries(ids ...string) []ChangeEntry {
 	return out
 }
 
-// ReadAt returns per instance up to when entries count as read.
+// ReadAt returns per instance up to when arrived entries count as read.
 func (l *ChangeLog) ReadAt() map[string]time.Time {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -143,8 +170,13 @@ func (l *ChangeLog) ReadAt() map[string]time.Time {
 	return out
 }
 
-// Unread counts entries of the given instances (all when ids is empty) newer than
-// their read mark. When skipOwn is set, the user's own changes are not counted.
+// IsUnread reports whether an entry arrived after the read mark.
+func IsUnread(e ChangeEntry, readAt time.Time) bool {
+	return e.Arrived.After(readAt)
+}
+
+// Unread counts entries of the given instances (all when ids is empty) that arrived
+// after their read mark. When skipOwn is set, the user's own changes are not counted.
 func (l *ChangeLog) Unread(skipOwn bool, ids ...string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -154,10 +186,7 @@ func (l *ChangeLog) Unread(skipOwn bool, ids ...string) int {
 			continue
 		}
 		for _, e := range il.Entries {
-			if !e.At.After(il.ReadAt) {
-				break // newest first
-			}
-			if !(skipOwn && e.Own) {
+			if IsUnread(e, il.ReadAt) && !(skipOwn && e.Own) {
 				n++
 			}
 		}
@@ -165,24 +194,27 @@ func (l *ChangeLog) Unread(skipOwn bool, ids ...string) int {
 	return n
 }
 
-// MarkRead marks all entries of the given instances (all when ids is empty) up to t as read.
+// MarkRead marks all entries of the given instances (all when ids is empty) that
+// arrived up to t as read.
 func (l *ChangeLog) MarkRead(t time.Time, ids ...string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for id, il := range l.data.Instances {
 		if (len(ids) == 0 || slices.Contains(ids, id)) && t.After(il.ReadAt) {
 			il.ReadAt = t
+			l.version++
 		}
 	}
 }
 
-// Retain drops instances that are no longer configured.
+// Retain drops instances that are no longer configured or have the changelog off.
 func (l *ChangeLog) Retain(ids []string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for id := range l.data.Instances {
 		if !slices.Contains(ids, id) {
 			delete(l.data.Instances, id)
+			l.version++
 		}
 	}
 }

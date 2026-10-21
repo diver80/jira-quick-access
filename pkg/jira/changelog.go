@@ -36,7 +36,8 @@ type ChangeEntry struct {
 	Author     string     `json:"author,omitempty"`
 	Own        bool       `json:"own,omitempty"`       // made by the API token's user
 	Mentioned  bool       `json:"mentioned,omitempty"` // comment mentions the API token's user
-	At         time.Time  `json:"at"`
+	At         time.Time  `json:"at"`                  // when it happened in Jira
+	Arrived    time.Time  `json:"arrived"`             // when this app recorded it; drives unread marks
 }
 
 // URL links to the ticket, scrolled to the comment for comment entries.
@@ -276,14 +277,41 @@ func excerpt(s string, n int) string {
 	return strings.TrimRight(cut, " ,.;:") + "…"
 }
 
-var orderByClause = regexp.MustCompile(`(?is)\s*\border\s+by\b.*$`)
+var orderByKeyword = regexp.MustCompile(`(?i)^order\s+by\b`)
+
+// stripOrderBy removes a trailing ORDER BY clause, ignoring "order by" inside quoted values.
+func stripOrderBy(jql string) string {
+	var quote rune
+	escaped := false
+	for i, r := range jql {
+		switch {
+		case escaped:
+			escaped = false
+		case r == '\\':
+			escaped = true
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '"' || r == '\'':
+			quote = r
+		case (r == 'o' || r == 'O') && (i == 0 || !isJQLWordRune(jql[i-1])) && orderByKeyword.MatchString(jql[i:]):
+			return strings.TrimSpace(jql[:i])
+		}
+	}
+	return strings.TrimSpace(jql)
+}
+
+func isJQLWordRune(b byte) bool {
+	return b == '_' || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
+}
 
 // deltaJQL restricts an instance's filter to tickets updated within the last window.
 // A relative date avoids converting to the Jira user's time zone.
 func deltaJQL(jql string, window time.Duration) string {
 	minutes := int(window/time.Minute) + 1
 	cond := fmt.Sprintf(`updated >= "-%dm"`, minutes)
-	filter := strings.TrimSpace(orderByClause.ReplaceAllString(jql, ""))
+	filter := stripOrderBy(jql)
 	if filter == "" {
 		return cond + " ORDER BY updated ASC"
 	}

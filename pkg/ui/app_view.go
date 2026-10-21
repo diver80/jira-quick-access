@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -110,6 +111,8 @@ type AppView struct {
 	hoveredChange     string               // instance ID + "/" + entry ID
 	changesReadAt     map[string]time.Time // read marks before the Changes tab was opened
 	ticketURLOverride string               // next ticket view loads this URL (e.g. a focused comment)
+	changesCache      *changesView
+	membershipJQL     map[string]string // base URL + JQL per instance at the last refresh
 
 	// Callbacks
 	onRedraw       func()
@@ -185,6 +188,8 @@ type appViewStateSnapshot struct {
 	hoveredBoard      bool
 	boardTab          int
 	changes           []jira.ChangeEntry
+	changeRows        []changeRow
+	changesTotal      float32
 	changesScroll     float32
 	hoveredChange     string
 	changesReadAt     map[string]time.Time
@@ -718,9 +723,11 @@ func (v *AppView) snapshot() appViewStateSnapshot {
 	monitors := make([]window.MonitorInfo, len(v.monitors))
 	copy(monitors, v.monitors)
 
+	cv := v.changesViewLocked()
 	var changes []jira.ChangeEntry
+	var changeRows []changeRow
 	if v.showBoard && v.boardTab == boardTabChanges && v.state == window.StateExpanded {
-		changes = v.visibleChangesLocked()
+		changes, changeRows = cv.entries, cv.rows
 	}
 
 	return appViewStateSnapshot{
@@ -775,10 +782,12 @@ func (v *AppView) snapshot() appViewStateSnapshot {
 		hoveredBoard:      v.hoveredBoard,
 		boardTab:          v.boardTab,
 		changes:           changes,
+		changeRows:        changeRows,
+		changesTotal:      cv.total,
 		changesScroll:     v.changesScroll,
 		hoveredChange:     v.hoveredChange,
 		changesReadAt:     maps.Clone(v.changesReadAt),
-		changesUnread:     v.unreadChangesLocked(),
+		changesUnread:     cv.unread,
 		changesOff:        len(v.changesScopeLocked()) == 0,
 	}
 }
@@ -890,7 +899,7 @@ func (v *AppView) loadActiveTicketInMobileView() {
 
 	url := ""
 	if !cfg.DemoMode {
-		url = firstNonEmptyStr(override, ticketURL(iss, cfg.BaseURL))
+		url = cmp.Or(override, ticketURL(iss, cfg.BaseURL))
 	}
 	window.SetTicketHeader(iss.Key, iss.Summary, url, branchName(cfg.BranchPrefix, iss))
 	if url != "" {

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -59,20 +60,25 @@ func (v *AppView) RefreshChanges() {
 		now := time.Now()
 		var fresh []jira.ChangeEntry
 		for id, ch := range res.Instances {
-			added := log.Merge(id, ch.Entries, ch.Watermark, ch.Backfill, now)
-			if !ch.Backfill {
+			if added, history := log.Merge(id, ch, now); !history {
 				fresh = append(fresh, added...)
 			}
 		}
+		// Disabled or removed instances lose their stored entries; turning the
+		// changelog back on starts with a fresh look-back. Like the fetch itself,
+		// this follows the saved settings, not unsaved edits in the settings page.
+		log.Retain(v.savedChangesInstances())
 
 		v.mu.Lock()
-		ids := v.changesInstancesLocked(-1)
 		notify := v.config.Notifications
+		// Entries arriving while the Changes tab is on screen are seen right away.
+		if v.showBoard && v.boardTab == boardTabChanges && v.state == window.StateExpanded {
+			if scope := v.changesScopeLocked(); len(scope) > 0 {
+				log.MarkRead(now, scope...)
+			}
+		}
 		v.mu.Unlock()
 
-		// Disabled or removed instances lose their stored entries; turning the
-		// changelog back on starts with a fresh backfill.
-		log.Retain(ids)
 		_ = log.Save()
 		if notify {
 			notifyMentions(fresh)
@@ -81,23 +87,33 @@ func (v *AppView) RefreshChanges() {
 	}()
 }
 
-// notifyMentions announces new comments that mention the user.
-func notifyMentions(entries []jira.ChangeEntry) {
+// mentionNotifications returns the new comments that mention the user.
+func mentionNotifications(entries []jira.ChangeEntry) []jira.ChangeEntry {
+	var out []jira.ChangeEntry
 	for _, e := range entries {
 		if e.Kind == jira.ChangeComment && e.Mentioned && !e.Own {
-			window.Notify(fmt.Sprintf("%s · %s mentioned you", e.IssueKey, firstNonEmptyStr(e.Author, "Someone")), e.Text, e.IssueKey, e.InstanceID)
+			out = append(out, e)
 		}
+	}
+	return out
+}
+
+// notifyMentions announces new mentions, summarising large batches (e.g. after a break).
+func notifyMentions(entries []jira.ChangeEntry) {
+	mentions := mentionNotifications(entries)
+	if len(mentions) > maxSingleNotifications {
+		first := mentions[0]
+		window.Notify(fmt.Sprintf("You were mentioned %d times", len(mentions)), "Open the Changes tab (⌘L) to read them.", first.IssueKey, first.InstanceID)
+		return
+	}
+	for _, e := range mentions {
+		window.Notify(fmt.Sprintf("%s · %s mentioned you", e.IssueKey, cmp.Or(e.Author, "Someone")), e.Text, e.IssueKey, e.InstanceID)
 	}
 }
 
-func firstNonEmptyStr(values ...string) string {
-	for _, s := range values {
-		if s != "" {
-			return s
-		}
-	}
-	return ""
-}
+// maxMembershipChanges per instance and refresh; more usually means the JQL itself
+// changed (or the result hit the search cap) rather than tickets moving in or out.
+const maxMembershipChanges = 25
 
 // membershipEntries records tickets that entered or left an instance's filter
 // between two complete refreshes. Jira's changelog does not cover this.
@@ -128,50 +144,100 @@ func membershipEntries(prev, next []jira.Issue, comparable map[string]bool, now 
 	return out
 }
 
-// recordMembershipLocked stores filter membership changes. Called with v.mu held.
+// recordMembershipLocked stores filter membership changes. Instances whose JQL
+// changed since the last refresh are skipped: their difference is the new query,
+// not tickets moving. Called with v.mu held.
 func (v *AppView) recordMembershipLocked(prev, next []jira.Issue, comparable map[string]bool) {
 	if v.changelog == nil {
 		return
 	}
+	jql := map[string]string{}
+	for _, inst := range v.savedInstances() {
+		jql[inst.ID] = inst.BaseURL + "\n" + inst.JQLQuery
+	}
+	stable := map[string]bool{}
+	for id := range comparable {
+		if q, ok := v.membershipJQL[id]; ok && q == jql[id] {
+			stable[id] = true
+		}
+	}
+	v.membershipJQL = jql
+
 	now := time.Now()
-	enabled := v.changesInstancesLocked(-1)
+	enabled := v.savedChangesInstances()
 	byInst := map[string][]jira.ChangeEntry{}
-	for _, e := range membershipEntries(prev, next, comparable, now) {
+	for _, e := range membershipEntries(prev, next, stable, now) {
 		if slices.Contains(enabled, e.InstanceID) {
 			byInst[e.InstanceID] = append(byInst[e.InstanceID], e)
 		}
 	}
 	for id, entries := range byInst {
-		v.changelog.Merge(id, entries, time.Time{}, false, now)
+		if len(entries) <= maxMembershipChanges {
+			v.changelog.Add(id, entries, now)
+		}
 	}
 }
 
-// ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
+// savedInstances returns the instances of the saved settings (the view's own
+// configuration when there is no client, e.g. in tests).
+func (v *AppView) savedInstances() []jira.InstanceConfig {
+	if v.client == nil {
+		return v.config.Instances
+	}
+	return v.client.GetConfig().Instances
+}
 
-// changesInstancesLocked returns the IDs of instances with the changelog turned on,
-// limited to the instance at idx when idx is valid (the board's instance filter).
-func (v *AppView) changesInstancesLocked(idx int) []string {
+// savedChangesInstances returns the saved instances with the changelog turned on.
+// The client holds the saved settings; the settings page edits v.config until Save.
+func (v *AppView) savedChangesInstances() []string {
 	var ids []string
-	for i, inst := range v.config.Instances {
-		if !inst.ChangesDisabled && (idx < 0 || idx >= len(v.config.Instances) || i == idx) {
+	for _, inst := range v.savedInstances() {
+		if !inst.ChangesDisabled {
 			ids = append(ids, inst.ID)
 		}
 	}
 	return ids
 }
 
-// changesScopeLocked returns the instances whose changes the board shows.
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+
+// changesScopeLocked returns the instances whose changes the board shows: the
+// board's instance filter, without instances whose changelog is off (saved setting).
 func (v *AppView) changesScopeLocked() []string {
-	return v.changesInstancesLocked(v.activeInstIdx)
+	enabled := v.savedChangesInstances()
+	var ids []string
+	for i, inst := range v.config.Instances {
+		if slices.Contains(enabled, inst.ID) && (v.activeInstIdx < 0 || v.activeInstIdx >= len(v.config.Instances) || i == v.activeInstIdx) {
+			ids = append(ids, inst.ID)
+		}
+	}
+	return ids
 }
 
-// visibleChangesLocked applies the instance filter, the search and "hide mine".
-func (v *AppView) visibleChangesLocked() []jira.ChangeEntry {
+// changesView is the filtered list, its row layout and the unread count, cached
+// until the changelog, the scope, the search, "hide mine" or the day changes.
+type changesView struct {
+	key     string
+	entries []jira.ChangeEntry
+	rows    []changeRow
+	total   float32
+	unread  int
+}
+
+func (v *AppView) changesViewLocked() *changesView {
+	if v.changelog == nil {
+		return &changesView{}
+	}
 	scope := v.changesScopeLocked()
-	if v.changelog == nil || len(scope) == 0 {
-		return nil
+	if len(scope) == 0 {
+		return &changesView{}
+	}
+	now := time.Now()
+	key := fmt.Sprintf("%d|%s|%s|%v|%s", v.changelog.Version(), strings.Join(scope, ","), v.searchQuery, v.config.ChangesHideOwn, now.Format("2006-01-02"))
+	if v.changesCache != nil && v.changesCache.key == key {
+		return v.changesCache
 	}
 	all := v.changelog.Entries(scope...)
 	q := strings.ToLower(v.searchQuery)
@@ -185,15 +251,19 @@ func (v *AppView) visibleChangesLocked() []jira.ChangeEntry {
 		}
 		out = append(out, e)
 	}
-	return out
+	cv := &changesView{key: key, entries: out, unread: v.changelog.Unread(v.config.ChangesHideOwn, scope...)}
+	cv.rows, cv.total = layoutChangeRows(out, now)
+	v.changesCache = cv
+	return cv
+}
+
+// visibleChangesLocked applies the instance filter, the search and "hide mine".
+func (v *AppView) visibleChangesLocked() []jira.ChangeEntry {
+	return v.changesViewLocked().entries
 }
 
 func (v *AppView) unreadChangesLocked() int {
-	scope := v.changesScopeLocked()
-	if v.changelog == nil || len(scope) == 0 {
-		return 0
-	}
-	return v.changelog.Unread(v.config.ChangesHideOwn, scope...)
+	return v.changesViewLocked().unread
 }
 
 // showChangesTabLocked switches the board overlay to the Changes tab and marks its
@@ -369,7 +439,7 @@ func (v *AppView) handleChangesClick(r geometry.Rect, pos geometry.Point) bool {
 		return true
 	}
 	v.mu.Lock()
-	rows, _ := layoutChangeRows(v.visibleChangesLocked(), time.Now())
+	rows := v.changesViewLocked().rows
 	scroll := v.changesScroll
 	v.mu.Unlock()
 	if e, ok := changeHit(changesBody(r), rows, scroll, pos); ok {
@@ -381,9 +451,8 @@ func (v *AppView) handleChangesClick(r geometry.Rect, pos geometry.Point) bool {
 func (v *AppView) handleChangesHover(r geometry.Rect, pos geometry.Point) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	rows, _ := layoutChangeRows(v.visibleChangesLocked(), time.Now())
 	hovered := ""
-	if e, ok := changeHit(changesBody(r), rows, v.changesScroll, pos); ok {
+	if e, ok := changeHit(changesBody(r), v.changesViewLocked().rows, v.changesScroll, pos); ok {
 		hovered = e.InstanceID + "/" + e.ID
 	}
 	changed := hovered != v.hoveredChange
@@ -394,7 +463,7 @@ func (v *AppView) handleChangesHover(r geometry.Rect, pos geometry.Point) bool {
 func (v *AppView) handleChangesWheel(r geometry.Rect, deltaY float32) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	_, total := layoutChangeRows(v.visibleChangesLocked(), time.Now())
+	total := v.changesViewLocked().total
 	v.changesScroll = max(0, min(v.changesScroll-deltaY*0.8, changesMaxScroll(changesBody(r), total)))
 }
 
@@ -420,7 +489,7 @@ func (v *AppView) drawChanges(canvas widget.Canvas, r geometry.Rect, s appViewSt
 		return
 	}
 
-	rows, total := layoutChangeRows(s.changes, time.Now())
+	rows, total := s.changeRows, s.changesTotal
 	canvas.PushClip(body)
 	for _, row := range rows {
 		y := body.Min.Y + row.y - s.changesScroll
@@ -465,7 +534,7 @@ func (v *AppView) drawChangeRow(canvas widget.Canvas, rect geometry.Rect, e jira
 		}
 	}
 	canvas.DrawRoundRect(geometry.NewRect(rect.Min.X+3, rect.Min.Y+8, 3, rect.Height()-16), accent, 1.5)
-	if e.At.After(s.changesReadAt[e.InstanceID]) {
+	if jira.IsUnread(e, s.changesReadAt[e.InstanceID]) {
 		canvas.DrawCircle(geometry.Pt(rect.Min.X+14, rect.Min.Y+14), 3, colorChangeUnread)
 	}
 
@@ -515,7 +584,7 @@ func describeChange(e jira.ChangeEntry) (label, detail string, color widget.Colo
 	case jira.ChangeAdded:
 		return "Entered filter", e.From, ColorStatusDone
 	case jira.ChangeRemoved:
-		return "Left filter", "Last status: " + firstNonEmptyStr(e.From, "unknown"), widget.RGBA8(248, 113, 113, 255)
+		return "Left filter", "Last status: " + cmp.Or(e.From, "unknown"), widget.RGBA8(248, 113, 113, 255)
 	}
 	label = fieldLabel(e.Field)
 	switch {
@@ -532,7 +601,7 @@ func describeChange(e jira.ChangeEntry) (label, detail string, color widget.Colo
 }
 
 func arrow(from, to string) string {
-	return firstNonEmptyStr(from, "–") + " → " + firstNonEmptyStr(to, "–")
+	return cmp.Or(from, "–") + " → " + cmp.Or(to, "–")
 }
 
 // fieldLabel capitalises Jira's lower-case system field names (e.g. "assignee").
