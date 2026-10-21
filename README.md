@@ -110,7 +110,7 @@ All of these live in **Settings → System** (together with *Launch at login* an
 
 ## 🛠️ Multi-Platform Build & Run
 
-Requires **Go 1.27+** (matching `go.mod`). Zero external C libraries required on Windows and Linux; uses native Cocoa/WebKit on macOS.
+Requires **Go 1.27+** (matching `go.mod`); `go.mod` pins toolchain **go1.27.3** (security fixes), which the go command downloads automatically when your local Go is older. Zero external C libraries required on Windows and Linux; uses native Cocoa/WebKit on macOS.
 
 ### Quick Start:
 ```bash
