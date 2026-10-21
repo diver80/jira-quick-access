@@ -27,6 +27,7 @@ type settingsLayout struct {
 	bounds                                        geometry.Rect
 	instancesTab, applicationTab, close, save     geometry.Rect
 	importEnv, testConnection, deleteInstance     geometry.Rect
+	instanceChanges                               geometry.Rect // per-instance changelog on/off
 	addInstance, previousInstances, nextInstances geometry.Rect
 	instanceTabs                                  []settingsInstanceTab
 	fields                                        [7]geometry.Rect
@@ -55,7 +56,8 @@ func newSettingsLayout(r geometry.Rect, instanceCount, selectedInstance, monitor
 		close:        rect(w-76, 14, 56, 26), save: rect(w-156, r.Height()-40, 136, 28),
 		importEnv: rect(32, 460, 94, 28), testConnection: rect(134, 460, 134, 28),
 		deleteInstance: rect(w-158, 460, 126, 28), addInstance: rect(w-112, 144, 80, 26),
-		leftEdge: rect(32, 178, 95, 26), rightEdge: rect(135, 178, 95, 26),
+		instanceChanges: rect(w-232, 423, 200, 26),
+		leftEdge:        rect(32, 178, 95, 26), rightEdge: rect(135, 178, 95, 26),
 		alwaysOnTop: rect(244, 178, 140, 26), autoHide: rect(392, 178, w-424, 26),
 		statusEnabled: rect(310, 346, 180, 26),
 		demoMode:      rect(32, 454, 150, 28), debugMode: rect(190, 454, 140, 28),

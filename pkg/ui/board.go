@@ -55,13 +55,18 @@ func groupBoard(issues []jira.Issue) [boardColumnCount][]jira.Issue {
 }
 
 type boardLayout struct {
-	close geometry.Rect
-	cols  [boardColumnCount]geometry.Rect // column background incl. header
-	body  [boardColumnCount]geometry.Rect // scrollable card area
+	close   geometry.Rect
+	tabs    [2]geometry.Rect                // Board / Changes switch
+	hideOwn geometry.Rect                   // Changes tab: "Hide mine"
+	cols    [boardColumnCount]geometry.Rect // column background incl. header
+	body    [boardColumnCount]geometry.Rect // scrollable card area
 }
 
 func newBoardLayout(r geometry.Rect) boardLayout {
 	l := boardLayout{close: geometry.NewRect(r.Max.X-54, r.Min.Y+14, 40, 26)}
+	l.tabs[boardTabBoard] = geometry.NewRect(r.Min.X+16, r.Min.Y+10, 66, 24)
+	l.tabs[boardTabChanges] = geometry.NewRect(r.Min.X+86, r.Min.Y+10, 100, 24)
+	l.hideOwn = geometry.NewRect(l.close.Min.X-100, l.close.Min.Y, 92, 26)
 	gap := float32(10)
 	colW := (r.Width() - 32 - 2*gap) / boardColumnCount
 	top := r.Min.Y + 56
@@ -143,6 +148,18 @@ func (v *AppView) handleBoardClick(r geometry.Rect, pos geometry.Point) bool {
 		v.SetState(window.StateFan)
 		return true
 	}
+	for tab, rect := range l.tabs {
+		if rect.Contains(pos) {
+			v.setBoardTab(tab)
+			return true
+		}
+	}
+	v.mu.Lock()
+	tab := v.boardTab
+	v.mu.Unlock()
+	if tab == boardTabChanges {
+		return v.handleChangesClick(r, pos)
+	}
 	v.mu.Lock()
 	cols := groupBoard(v.getFilteredIssuesLocked())
 	scroll := v.boardScroll
@@ -160,6 +177,10 @@ func (v *AppView) handleBoardClick(r geometry.Rect, pos geometry.Point) bool {
 func (v *AppView) handleBoardHover(r geometry.Rect, pos geometry.Point) bool {
 	l := newBoardLayout(r)
 	v.mu.Lock()
+	if v.boardTab == boardTabChanges {
+		v.mu.Unlock()
+		return v.handleChangesHover(r, pos)
+	}
 	defer v.mu.Unlock()
 	hovered := ""
 	if iss, ok := boardHit(l, groupBoard(v.getFilteredIssuesLocked()), v.boardScroll, pos); ok {
@@ -173,6 +194,11 @@ func (v *AppView) handleBoardHover(r geometry.Rect, pos geometry.Point) bool {
 func (v *AppView) handleBoardWheel(r geometry.Rect, pos geometry.Point, deltaY float32) {
 	l := newBoardLayout(r)
 	v.mu.Lock()
+	if v.boardTab == boardTabChanges {
+		v.mu.Unlock()
+		v.handleChangesWheel(r, deltaY)
+		return
+	}
 	defer v.mu.Unlock()
 	cols := groupBoard(v.getFilteredIssuesLocked())
 	for c := range cols {
@@ -190,22 +216,30 @@ func (v *AppView) drawBoard(canvas widget.Canvas, r geometry.Rect, s appViewStat
 	canvas.DrawRoundRect(r, widget.RGBA8(18, 24, 36, 250), radius)
 	canvas.StrokeRoundRect(r, widget.RGBA8(255, 255, 255, 70), radius, 1.0)
 
-	canvas.DrawText("Board", geometry.NewRect(r.Min.X+22, r.Min.Y+14, 200, 22), 15, widget.RGBA8(245, 250, 255, 255), true, widget.TextAlignLeft)
+	l := newBoardLayout(r)
+	drawBoardTabs(canvas, l, s.boardTab, s.changesUnread)
 
 	scope := "All instances"
 	if s.activeInstIdx >= 0 && s.activeInstIdx < len(s.instances) {
 		scope = s.instances[s.activeInstIdx].Name
 	}
 	sub := fmt.Sprintf("%s · %d tickets", scope, len(s.filteredIssues))
+	if s.boardTab == boardTabChanges {
+		sub = fmt.Sprintf("%s · %d changes", scope, len(s.changes))
+	}
 	if s.searchQuery != "" {
 		sub += fmt.Sprintf(" · search \"%s\"", s.searchQuery)
 	}
-	canvas.DrawText(sub, geometry.NewRect(r.Min.X+22, r.Min.Y+36, r.Width()-120, 14), 9, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
+	canvas.DrawText(sub, geometry.NewRect(r.Min.X+22, r.Min.Y+38, r.Width()-120, 14), 9, widget.RGBA8(148, 163, 184, 255), false, widget.TextAlignLeft)
 
-	l := newBoardLayout(r)
 	canvas.DrawRoundRect(l.close, widget.RGBA8(38, 48, 68, 240), 5)
 	canvas.StrokeRoundRect(l.close, widget.RGBA8(255, 255, 255, 60), 5, 1.0)
 	canvas.DrawText("✕", l.close, 11, widget.RGBA8(240, 245, 255, 255), true, widget.TextAlignCenter)
+
+	if s.boardTab == boardTabChanges {
+		v.drawChanges(canvas, r, s)
+		return
+	}
 
 	cols := groupBoard(s.filteredIssues)
 	for c := range cols {
@@ -317,7 +351,7 @@ func fitText(text string, size, maxW float32) string {
 }
 
 // drawBoardButton draws the "Board" entry with a small three-column glyph.
-func drawBoardButton(canvas widget.Canvas, r geometry.Rect, active, hovered bool) {
+func drawBoardButton(canvas widget.Canvas, r geometry.Rect, active, hovered, unread bool) {
 	bg := widget.RGBA8(36, 46, 66, 230)
 	border := widget.RGBA8(255, 255, 255, 45)
 	if active {
@@ -337,6 +371,9 @@ func drawBoardButton(canvas widget.Canvas, r geometry.Rect, active, hovered bool
 		canvas.DrawRoundRect(geometry.NewRect(iconX+float32(i)*4, iconY, 3, hgt), fg, 1)
 	}
 	canvas.DrawText("Board", geometry.NewRect(iconX+14, r.Min.Y+r.Height()/2-8, r.Width()-25, 16), 10, fg, true, widget.TextAlignLeft)
+	if unread {
+		canvas.DrawCircle(geometry.Pt(r.Max.X-6, r.Min.Y+6), 3.5, colorChangeUnread)
+	}
 }
 
 // drawSettingsIconButton draws the compact gear button next to the board button.

@@ -80,6 +80,7 @@ Standard macOS clipboard shortcuts dispatch natively throughout embedded WebView
 | `⌘K` / `⌘F` | Focus the ticket search |
 | `⌘R` | Refresh tickets now |
 | `⌘B` | Open or close the board |
+| `⌘L` | Open or close the **Changes** tab of the board |
 | `⌘O` | Open the selected ticket in the browser |
 | `⌘C` | Copy the selected ticket key (outside text fields) |
 | `⌘⇧C` | Copy a Git branch name for the selected ticket (`feature/OPS-12-fix-login-timeout`) |
@@ -91,6 +92,7 @@ Standard macOS clipboard shortcuts dispatch natively throughout embedded WebView
 - **Ticket header**: The panel shows the ticket key and summary with **Copy key**, **Copy link**, **Copy branch** and **Open ↗** (browser) actions.
 - **Notifications**: After each refresh, macOS notifications announce newly assigned tickets and status changes. Changes to tickets you opened in the panel during the last 15 minutes are skipped; clicking a notification opens the ticket.
 - **Board**: The **Board** button in the fan (or `⌘B`) shows the same tickets — configured JQL, instance filter and search — in three read-only columns by Jira status category: *To Do*, *In Progress*, *Done*. Click a card to open the ticket.
+- **Changes**: The board's second tab is a changelog per instance for the tickets of its JQL filter — status changes, other field updates (assignee, priority, sprint, …), **new and edited comments** with author and excerpt, and tickets entering or leaving the filter — grouped by day, newest first. Comments that @mention you are highlighted and announced with a notification. New entries since your last visit get a dot (and a counter on the tab and the Board button); **Hide mine** hides your own changes. Click an entry to open the ticket, scrolled to the comment. Each refresh runs one extra search per instance (`updated` since the last check, with Jira's changelog) plus one comment request per changed ticket; the first check looks back 7 days. Entries are kept 30 days in `~/.jira-quick-access/changelog.json`. The changelog can be switched off per instance in **Settings → Jira instances**.
 - **Ticket order**: Jira order (per instance JQL), last updated, priority or status.
 - **Sync errors per instance**: If one Jira site fails, its tickets stay visible from the last refresh and its beacon turns red; the other sites keep updating.
 - **Update check**: Once a day the app asks GitHub for the latest release and shows a badge in Settings when a newer version is available.
@@ -101,7 +103,7 @@ All of these live in **Settings → System** (together with *Launch at login* an
 
 ## 🔒 Security & Privacy
 
-- **Local Storage Only**: Configurations and tokens are saved strictly to your local machine at `~/.jira-quick-access/config.json`.
+- **Local Storage Only**: Configurations and tokens are saved strictly to your local machine at `~/.jira-quick-access/config.json`; the changelog (including comment excerpts) is kept next to it in `changelog.json`.
 - **Zero Telemetry**: No tracking SDKs, no analytics. Besides your Jira sites, the app only contacts the Atlassian status page (health monitoring) and the GitHub releases API (update check); both can be switched off in Settings.
 - **Direct Atlassian API**: All requests travel directly between your machine and your configured Jira instances via TLS.
 - **Token Masking**: API tokens are masked in the UI (`AT••••••••••••00`) to prevent accidental shoulder surfing.
@@ -184,9 +186,12 @@ jira-quick-access/
 │   │   ├── client.go           # Multi-instance Jira REST API v3 client
 │   │   ├── models.go           # Issue, InstanceConfig, Status & Theme models
 │   │   ├── storage.go          # Config serialization & .env loader
+│   │   ├── changelog*.go       # Changes search, comments, ADF/wiki text & changelog store
 │   │   └── mock.go             # Demo mock data generator
 │   ├── ui/
 │   │   ├── app_view.go         # 3-State root view, mouse tracking & Dock rendering
+│   │   ├── board.go            # Board overlay (status columns)
+│   │   ├── changes.go          # Changes tab: changelog list, unread marks, mentions
 │   │   ├── theme.go            # Glassmorphic pastel palettes & design tokens
 │   │   ├── components.go       # Toast notifications & UI helpers
 │   │   └── settings_widget.go  # Multi-instance credentials overlay
