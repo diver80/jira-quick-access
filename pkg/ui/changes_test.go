@@ -387,7 +387,7 @@ func TestRestCapsuleOverviewIcon(t *testing.T) {
 
 	// Overview and settings badges stack below the instances without overlapping.
 	ov, set := restOverviewRect(w, h), restSettingsRect(w, h)
-	if ov.Max.Y > set.Min.Y || ov.Min.Y < h-restBottomOffset || set.Max.Y > h-4 {
+	if ov.Max.Y > set.Min.Y || ov.Min.Y <= restBottomDividerY(h) || restBottomDividerY(h) < h-restBottomOffset+4 || set.Max.Y > h-4 {
 		t.Fatalf("badges out of place: overview %+v settings %+v", ov, set)
 	}
 

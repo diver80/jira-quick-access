@@ -143,14 +143,18 @@ type AppView struct {
 
 // The rest capsule ends with two stacked icon badges: overview (board / changes)
 // above settings. restBottomOffset is the height they take below the instances.
-const restBottomOffset = float32(47)
+const restBottomOffset = float32(49)
+
+// restBottomDividerY separates the instances from the icon badges, like the line
+// below the status badge at the top.
+func restBottomDividerY(h float32) float32 { return h - 44 }
 
 func restOverviewRect(w, h float32) geometry.Rect {
-	return geometry.NewRect(w/2-12, h-43, 24, 17)
+	return geometry.NewRect(w/2-12, h-40, 24, 17)
 }
 
 func restSettingsRect(w, h float32) geometry.Rect {
-	return geometry.NewRect(w/2-12, h-23, 24, 17)
+	return geometry.NewRect(w/2-12, h-21, 24, 17)
 }
 
 // fanIdleCollapse closes the fan on platforms without pointer tracking after this
@@ -1532,8 +1536,8 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		}
 
 		// Bottom Divider Line above overview and settings
-		bottomDividerY := b.Min.Y + h - restBottomOffset + 2
-		canvas.DrawLine(geometry.Pt(b.Min.X+7, bottomDividerY), geometry.Pt(b.Min.X+w-7, bottomDividerY), widget.RGBA8(255, 255, 255, 45), 1.0)
+		bottomDividerY := b.Min.Y + restBottomDividerY(h)
+		canvas.DrawLine(geometry.Pt(b.Min.X+7, bottomDividerY), geometry.Pt(b.Min.X+w-7, bottomDividerY), widget.RGBA8(255, 255, 255, 110), 1.2)
 
 		// Overview (board / changes) and settings icon badges
 		iconBadge := func(r geometry.Rect, hovered bool) {
