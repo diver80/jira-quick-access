@@ -7,6 +7,7 @@ import (
 
 	"github.com/gogpu/ui/event"
 	"github.com/gogpu/ui/geometry"
+	"github.com/gogpu/ui/widget"
 
 	"jira-quick-access/pkg/jira"
 	"jira-quick-access/pkg/window"
@@ -347,5 +348,34 @@ func TestBoardCardKeyShowsTicketChanges(t *testing.T) {
 	view.handleClick(geometry.Pt(card.Center().X, card.Max.Y-6))
 	if view.IsBoardOpen() || view.issues[view.activeIdx].Key != "A-2" {
 		t.Fatal("clicking the card outside the key should open the ticket")
+	}
+}
+
+func TestRestCapsuleMarksInstancesWithUnseenChanges(t *testing.T) {
+	view := newChangesTestView(t)
+	view.SetState(window.StateRest)
+	s := view.snapshot()
+	if s.unreadByInstance["a"] != 2 || s.unreadByInstance["b"] != 1 {
+		t.Fatalf("unexpected unread counts %v", s.unreadByInstance)
+	}
+	canvas := &testMockCanvas{}
+	view.Draw(&testMockContext{}, canvas)
+	marked := 0
+	for _, c := range canvas.getDrawTexts() {
+		if c.color == widget.RGBA8(30, 30, 30, 255) {
+			marked++
+		}
+	}
+	if marked != 2 {
+		t.Fatalf("both instances with unseen changes need a marked count, got %d", marked)
+	}
+
+	// Reading the changes of a clears its marker; a disabled site never gets one.
+	view.changelog.MarkRead(time.Now(), "a")
+	cfg := view.client.GetConfig()
+	cfg.Instances[1].ChangesDisabled = true
+	view.client.UpdateConfig(cfg)
+	if s := view.snapshot(); s.unreadByInstance["a"] != 0 || s.unreadByInstance["b"] != 0 {
+		t.Fatalf("markers should clear, got %v", s.unreadByInstance)
 	}
 }

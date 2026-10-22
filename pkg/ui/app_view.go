@@ -115,6 +115,8 @@ type AppView struct {
 	changesReadAt     map[string]time.Time // read marks before the Changes tab was opened
 	ticketURLOverride string               // next ticket view loads this URL (e.g. a focused comment)
 	changesCache      *changesView
+	unreadByInst      map[string]int // see unreadByInstanceLocked
+	unreadByInstKey   string
 	membershipJQL     map[string]string // base URL + JQL per instance at the last refresh
 
 	// Callbacks
@@ -205,6 +207,7 @@ type appViewStateSnapshot struct {
 	changesReadAt     map[string]time.Time
 	changesUnread     int
 	changesOff        bool // changelog turned off for every instance in the board's scope
+	unreadByInstance  map[string]int
 }
 
 func NewAppView(
@@ -807,6 +810,7 @@ func (v *AppView) snapshot() appViewStateSnapshot {
 		changesReadAt:     maps.Clone(v.changesReadAt),
 		changesUnread:     cv.unread,
 		changesOff:        len(v.changesScopeLocked()) == 0,
+		unreadByInstance:  v.unreadByInstanceLocked(),
 	}
 }
 
@@ -1499,9 +1503,14 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			badgeX := centerX - badgeW/2
 			badgeY := secY + 18
 			countBox := geometry.NewRect(badgeX, badgeY, badgeW, badgeH)
+			countFg := widget.RGBA8(245, 250, 255, 255)
+			if s.unreadByInstance[inst.ID] > 0 {
+				// Unseen changes on this site: the count turns into an amber marker.
+				badgeBg, badgeBorder, countFg = colorChangeMention, widget.RGBA8(255, 236, 170, 255), widget.RGBA8(30, 30, 30, 255)
+			}
 			canvas.DrawRoundRect(countBox, badgeBg, 5)
 			canvas.StrokeRoundRect(countBox, badgeBorder, 5, 1.0)
-			canvas.DrawText(countStr, geometry.NewRect(badgeX, badgeY+2, badgeW, badgeH-2), 10, widget.RGBA8(245, 250, 255, 255), true, widget.TextAlignCenter)
+			canvas.DrawText(countStr, geometry.NewRect(badgeX, badgeY+2, badgeW, badgeH-2), 10, countFg, true, widget.TextAlignCenter)
 
 			// Subtle Divider between instances
 			if idx < len(s.instances)-1 {

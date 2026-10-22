@@ -265,6 +265,25 @@ func (v *AppView) visibleChangesLocked() []jira.ChangeEntry {
 	return v.changesViewLocked().entries
 }
 
+// unreadByInstanceLocked counts unseen changes per instance with the changelog on,
+// for the markers on the rest capsule. Cached until the changelog changes.
+func (v *AppView) unreadByInstanceLocked() map[string]int {
+	if v.changelog == nil {
+		return nil
+	}
+	ids := v.savedChangesInstances()
+	key := fmt.Sprintf("%d|%v|%s", v.changelog.Version(), v.config.ChangesHideOwn, strings.Join(ids, ","))
+	if v.unreadByInstKey == key {
+		return v.unreadByInst
+	}
+	counts := make(map[string]int, len(ids))
+	for _, id := range ids {
+		counts[id] = v.changelog.Unread(v.config.ChangesHideOwn, id)
+	}
+	v.unreadByInst, v.unreadByInstKey = counts, key
+	return counts
+}
+
 func (v *AppView) unreadChangesLocked() int {
 	return v.changesViewLocked().unread
 }
