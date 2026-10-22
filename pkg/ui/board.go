@@ -250,7 +250,7 @@ func (v *AppView) drawBoard(canvas widget.Canvas, r geometry.Rect, s appViewStat
 
 	canvas.DrawRoundRect(l.close, widget.RGBA8(38, 48, 68, 240), 5)
 	canvas.StrokeRoundRect(l.close, widget.RGBA8(255, 255, 255, 60), 5, 1.0)
-	canvas.DrawText("✕", l.close, 11, widget.RGBA8(240, 245, 255, 255), true, widget.TextAlignCenter)
+	drawCloseIcon(canvas, l.close, 8, widget.RGBA8(240, 245, 255, 255))
 
 	if s.boardTab == boardTabChanges {
 		v.drawChanges(canvas, r, s)
@@ -413,7 +413,7 @@ func drawSettingsIconButton(canvas widget.Canvas, r geometry.Rect, active, hover
 	}
 	canvas.DrawRoundRect(r, bg, 8)
 	canvas.StrokeRoundRect(r, border, 8, 1.0)
-	canvas.DrawText("⚙", r, 12, widget.RGBA8(230, 240, 255, 255), true, widget.TextAlignCenter)
+	drawGearIcon(canvas, r, 6.5, widget.RGBA8(230, 240, 255, 255))
 	if updateAvailable {
 		drawUpdateDot(canvas, geometry.Pt(r.Max.X-6, r.Min.Y+6))
 	}

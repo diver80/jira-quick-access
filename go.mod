@@ -7,6 +7,7 @@ toolchain go1.27.3
 require (
 	github.com/gogpu/gogpu v0.53.2
 	github.com/gogpu/ui v0.1.54
+	golang.org/x/image v0.47.0
 )
 
 require (
@@ -18,7 +19,6 @@ require (
 	github.com/gogpu/gputypes v0.7.0 // indirect
 	github.com/gogpu/naga v0.19.1 // indirect
 	github.com/gogpu/wgpu v0.33.0 // indirect
-	golang.org/x/image v0.47.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 )

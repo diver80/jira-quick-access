@@ -1533,7 +1533,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		setRect := geometry.NewRect(centerX-12, b.Min.Y+h-25, 24, 18)
 		canvas.DrawRoundRect(setRect, setBg, 5)
 		canvas.StrokeRoundRect(setRect, setBorder, 5, 1.0)
-		canvas.DrawText("⚙", setRect, 11, widget.RGBA8(220, 235, 255, 240), true, widget.TextAlignCenter)
+		drawGearIcon(canvas, setRect, 5.5, widget.RGBA8(220, 235, 255, 240))
 		if s.update.Version != "" {
 			drawUpdateDot(canvas, geometry.Pt(setRect.Max.X-1, setRect.Min.Y+1))
 		}
@@ -1583,7 +1583,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		labelRect := geometry.NewRect(b.Min.X+24, instHeaderY+4, w-46, 14)
 		canvas.DrawText(instName, labelRect, 10, widget.RGBA8(235, 245, 255, 255), true, widget.TextAlignCenter)
 		if len(s.instances) > 1 {
-			canvas.DrawText("▾", geometry.NewRect(b.Min.X+w-20, instHeaderY+4, 12, 14), 9, widget.RGBA8(180, 200, 230, 200), false, widget.TextAlignCenter)
+			drawChevronDown(canvas, geometry.NewRect(b.Min.X+w-20, instHeaderY+4, 12, 14), 6, widget.RGBA8(180, 200, 230, 200))
 		}
 
 		// 4. Search Bar with Clear Button & Blinking Cursor
@@ -1619,7 +1619,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		if s.searchQuery != "" {
 			clearBtnRect := geometry.NewRect(b.Min.X+w-24, searchY+4, 14, 14)
 			canvas.DrawCircle(geometry.Pt(b.Min.X+w-17, searchY+11), 6.5, widget.RGBA8(255, 255, 255, 40))
-			canvas.DrawText("✕", clearBtnRect, 8, widget.RGBA8(255, 255, 255, 220), true, widget.TextAlignCenter)
+			drawCloseIcon(canvas, clearBtnRect, 5, widget.RGBA8(255, 255, 255, 220))
 		}
 
 		// 5. Tab Area (Smoothly clipped between top search and bottom settings tab)
@@ -1768,12 +1768,12 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		closeBtnRect := geometry.NewRect(tabStartX+tabBarWidth-34, b.Min.Y+12, 28, 22)
 		canvas.DrawRoundRect(closeBtnRect, widget.RGBA8(28, 38, 58, 240), 6)
 		canvas.StrokeRoundRect(closeBtnRect, widget.RGBA8(255, 255, 255, 140), 6, 1.0)
-		canvas.DrawText("✕", closeBtnRect, 10, widget.RGBA8(255, 255, 255, 240), true, widget.TextAlignCenter)
+		drawCloseIcon(canvas, closeBtnRect, 7, widget.RGBA8(255, 255, 255, 240))
 	} else {
 		closeBtnRect := geometry.NewRect(tabStartX+(tabBarWidth-36)/2, b.Min.Y+12, 36, 22)
 		canvas.DrawRoundRect(closeBtnRect, widget.RGBA8(28, 38, 58, 240), 6)
 		canvas.StrokeRoundRect(closeBtnRect, widget.RGBA8(255, 255, 255, 140), 6, 1.0)
-		canvas.DrawText("✕", closeBtnRect, 10, widget.RGBA8(255, 255, 255, 240), true, widget.TextAlignCenter)
+		drawCloseIcon(canvas, closeBtnRect, 7, widget.RGBA8(255, 255, 255, 240))
 	}
 
 	// Divider line below top dock controls
@@ -1963,7 +1963,7 @@ func (v *AppView) drawStatusPanel(ctx widget.Context, canvas widget.Canvas, r ge
 	closeRect := geometry.NewRect(r.Min.X+r.Width()-54, r.Min.Y+14, 40, 26)
 	canvas.DrawRoundRect(closeRect, widget.RGBA8(38, 48, 68, 240), 5)
 	canvas.StrokeRoundRect(closeRect, widget.RGBA8(255, 255, 255, 60), 5, 1.0)
-	canvas.DrawText("✕", closeRect, 11, widget.RGBA8(240, 245, 255, 255), true, widget.TextAlignCenter)
+	drawCloseIcon(canvas, closeRect, 8, widget.RGBA8(240, 245, 255, 255))
 
 	// 2. Global Status Health Banner
 	bannerY := r.Min.Y + 62
