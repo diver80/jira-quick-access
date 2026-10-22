@@ -9,7 +9,7 @@ No dock clutter, no window to manage. Slide the pointer to the right edge and th
 Current source version: **1.3.0**. Build outputs are generated locally under `dist/` and are not committed to Git. See Confluence for binary publication status.
 
 > [!NOTE]
-> **Platform Support**: Currently, **only the macOS (Darwin) version is actively tested and verified** (with native Cocoa edge docking, Retina multi-resolution icons, and embedded WebKit). Windows and Linux builds are experimental cross-compilations and not yet thoroughly tested.
+> **Platform Support**: Currently, **only the macOS (Darwin) version is actively tested and verified** (with native Cocoa edge docking, Retina multi-resolution icons, and embedded WebKit). Windows and Linux builds are experimental cross-compilations and not yet thoroughly tested. On Windows and Linux, tickets open in the default browser (no embedded ticket view), the fan closes after 8 seconds without pointer movement, and the global hotkey, notifications, launch at login and always-on-top/auto-hide are not available.
 
 ---
 

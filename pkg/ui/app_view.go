@@ -139,6 +139,10 @@ type AppView struct {
 	uiTasks        []func()
 }
 
+// fanIdleCollapse closes the fan on platforms without pointer tracking after this
+// long without pointer movement over it.
+const fanIdleCollapse = 8 * time.Second
+
 type appViewStateSnapshot struct {
 	bounds            geometry.Rect
 	state             window.WindowState
@@ -324,11 +328,16 @@ func NewAppView(
 
 				inside := window.IsMouseInside()
 				if st == window.StateFan && !searchAct {
-					if inside {
+					if !window.PointerTracking {
+						// Without native tracking, only pointer moves inside the window
+						// (which refresh lastHover) tell that the pointer is still there.
+						inside = time.Since(lastH) < fanIdleCollapse
+					}
+					if inside && window.PointerTracking {
 						v.mu.Lock()
 						v.lastHover = time.Now()
 						v.mu.Unlock()
-					} else {
+					} else if !inside {
 						v.setHoveredTab(-1)
 						if !lastH.IsZero() && time.Since(lastH) > 300*time.Millisecond {
 							v.postToUI(v.collapseIdleFan)
@@ -987,6 +996,10 @@ func generateMobileTicketHTML(iss jira.Issue) string {
 }
 
 func (v *AppView) Expand(tabIdx int) {
+	if !window.EmbeddedTicketView {
+		v.openTicketInBrowser(tabIdx)
+		return
+	}
 	v.mu.Lock()
 	v.activeIdx = tabIdx
 	v.activeTheme = GetTicketTheme(tabIdx)
@@ -996,6 +1009,33 @@ func (v *AppView) Expand(tabIdx int) {
 	v.mu.Unlock()
 	v.SetState(window.StateExpanded)
 }
+
+// openTicketInBrowser is Expand for platforms without an embedded ticket view: the
+// ticket opens in the default browser and the current view stays as it is.
+func (v *AppView) openTicketInBrowser(tabIdx int) {
+	v.mu.Lock()
+	if tabIdx < 0 || tabIdx >= len(v.issues) {
+		v.mu.Unlock()
+		return
+	}
+	iss := v.issues[tabIdx]
+	v.activeIdx = tabIdx
+	v.activeTheme = GetTicketTheme(tabIdx)
+	v.viewedAt[issueID(iss)] = time.Now()
+	url := cmp.Or(v.ticketURLOverride, ticketURL(iss, v.config.BaseURL))
+	v.ticketURLOverride = ""
+	if v.config.DemoMode {
+		url = ""
+	}
+	v.mu.Unlock()
+	if url == "" || openURL(url) != nil {
+		v.showToast("Ticket view is not available on this platform")
+	}
+	v.MarkNeedsLayout()
+}
+
+// openURL is window.OpenURL; tests replace it.
+var openURL = window.OpenURL
 
 func (v *AppView) OpenSettings() {
 	v.mu.Lock()
