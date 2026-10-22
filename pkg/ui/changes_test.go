@@ -62,8 +62,9 @@ func TestMembershipEntriesOnlyForComparableInstances(t *testing.T) {
 func TestCmdLOpensChangesForInstanceAndMarksRead(t *testing.T) {
 	view := newChangesTestView(t)
 	view.SetState(window.StateFan)
-	if s := view.snapshot(); s.changesUnread != 2 {
-		t.Fatalf("expected 2 unread changes for instance a, got %d", s.changesUnread)
+	// A-1's status change is the user's own and never counts as unread.
+	if s := view.snapshot(); s.changesUnread != 1 {
+		t.Fatalf("expected 1 unread change for instance a, got %d", s.changesUnread)
 	}
 
 	view.handleKey(event.NewKeyEvent(event.KeyPress, event.KeyL, 'l', event.ModSuper))
@@ -355,7 +356,7 @@ func TestRestCapsuleMarksInstancesWithUnseenChanges(t *testing.T) {
 	view := newChangesTestView(t)
 	view.SetState(window.StateRest)
 	s := view.snapshot()
-	if s.unreadByInstance["a"] != 2 || s.unreadByInstance["b"] != 1 {
+	if s.unreadByInstance["a"] != 1 || s.unreadByInstance["b"] != 1 {
 		t.Fatalf("unexpected unread counts %v", s.unreadByInstance)
 	}
 	canvas := &testMockCanvas{}

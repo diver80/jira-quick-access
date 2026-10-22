@@ -228,7 +228,7 @@ func TestChangeLogMergeDedupesPrunesAndCountsUnread(t *testing.T) {
 	if len(added) != 1 || !history {
 		t.Fatalf("entries beyond the retention must be dropped, got %+v", added)
 	}
-	if l.Unread(false) != 0 {
+	if l.Unread() != 0 {
 		t.Fatal("a backfill counts as read")
 	}
 	later := now.Add(time.Second)
@@ -236,11 +236,8 @@ func TestChangeLogMergeDedupesPrunesAndCountsUnread(t *testing.T) {
 	if len(added) != 2 || added[0].ID != "3" || history {
 		t.Fatalf("expected the two new entries newest first, got %+v", added)
 	}
-	if got := l.Unread(false); got != 2 {
-		t.Fatalf("expected 2 unread, got %d", got)
-	}
-	if got := l.Unread(true); got != 1 {
-		t.Fatalf("own changes must not count when hidden, got %d", got)
+	if got := l.Unread(); got != 1 {
+		t.Fatalf("own changes are never unread, expected 1, got %d", got)
 	}
 	if err := l.Save(); err != nil {
 		t.Fatal(err)
@@ -254,7 +251,7 @@ func TestChangeLogMergeDedupesPrunesAndCountsUnread(t *testing.T) {
 		t.Fatalf("watermark lost: %v", w)
 	}
 	reopened.MarkRead(later, "i1")
-	if reopened.Unread(false) != 0 {
+	if reopened.Unread() != 0 {
 		t.Fatal("mark read must clear unread")
 	}
 	reopened.Retain([]string{"other"})
@@ -283,7 +280,7 @@ func TestBackfillContinuationIsHistory(t *testing.T) {
 	if _, history := l.Merge("i", InstanceChanges{Entries: entry("2"), Complete: true}, now.Add(time.Minute)); !history {
 		t.Fatal("continuation of an incomplete look-back must not be announced")
 	}
-	if l.Unread(false) != 0 {
+	if l.Unread() != 0 {
 		t.Fatal("look-back entries count as read")
 	}
 	if _, history := l.Merge("i", InstanceChanges{Entries: entry("3"), Complete: true}, now.Add(2*time.Minute)); history {
@@ -350,5 +347,17 @@ func TestTruncatedSearchChangelogLoadsNewestPage(t *testing.T) {
 	}
 	if len(res.Entries) != 1 || res.Entries[0].To != "B" {
 		t.Fatalf("expected the status change from the newest changelog page, got %+v", res.Entries)
+	}
+}
+
+func TestOwnChangeMakesFilterEntryOwn(t *testing.T) {
+	l := OpenChangeLog(filepath.Join(t.TempDir(), "c.json"))
+	now := time.Now()
+	l.Merge("i", InstanceChanges{Watermark: now, Backfill: true, Complete: true}, now.Add(-time.Hour))
+	// The filter entry is recorded first, Jira's assignee change by the user later.
+	l.Add("i", []ChangeEntry{{ID: "m:A-1", IssueKey: "A-1", Kind: ChangeAdded, At: now}, {ID: "m:B-1", IssueKey: "B-1", Kind: ChangeAdded, At: now}}, now)
+	l.Add("i", []ChangeEntry{{ID: "h:1:0", IssueKey: "A-1", Kind: ChangeField, Field: "assignee", Own: true, At: now.Add(-2 * time.Minute)}}, now.Add(time.Minute))
+	if got := l.Unread(); got != 1 {
+		t.Fatalf("only B-1 (not caused by the user) should be unread, got %d", got)
 	}
 }

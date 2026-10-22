@@ -124,11 +124,38 @@ func (l *ChangeLog) addLocked(il *instanceChangeLog, instID string, entries []Ch
 		added = append(added, e)
 	}
 	il.Entries = append(il.Entries, added...)
+	attributeMembership(il.Entries)
 	sortNewestFirst(il.Entries)
 	il.Entries = pruneEntries(il.Entries, now)
 	sortNewestFirst(added)
 	l.version++
 	return added
+}
+
+// ownMembershipWindow links a filter entry to an own change of the same ticket.
+const ownMembershipWindow = 10 * time.Minute
+
+// attributeMembership marks "entered/left filter" entries as the user's own when the
+// user changed the same ticket around that time (e.g. assigned it to themselves);
+// Jira reports no author for them.
+func attributeMembership(entries []ChangeEntry) {
+	own := map[string][]time.Time{}
+	for _, e := range entries {
+		if e.Own && e.Kind != ChangeAdded && e.Kind != ChangeRemoved {
+			own[e.IssueKey] = append(own[e.IssueKey], e.At)
+		}
+	}
+	for i, e := range entries {
+		if e.Own || (e.Kind != ChangeAdded && e.Kind != ChangeRemoved) {
+			continue
+		}
+		for _, at := range own[e.IssueKey] {
+			if d := e.At.Sub(at); d <= ownMembershipWindow && d >= -ownMembershipWindow {
+				entries[i].Own = true
+				break
+			}
+		}
+	}
 }
 
 func sortNewestFirst(entries []ChangeEntry) {
@@ -170,14 +197,15 @@ func (l *ChangeLog) ReadAt() map[string]time.Time {
 	return out
 }
 
-// IsUnread reports whether an entry arrived after the read mark.
+// IsUnread reports whether an entry arrived after the read mark. The user's own
+// changes are never unread: they were made by the reader.
 func IsUnread(e ChangeEntry, readAt time.Time) bool {
-	return e.Arrived.After(readAt)
+	return !e.Own && e.Arrived.After(readAt)
 }
 
 // Unread counts entries of the given instances (all when ids is empty) that arrived
-// after their read mark. When skipOwn is set, the user's own changes are not counted.
-func (l *ChangeLog) Unread(skipOwn bool, ids ...string) int {
+// after their read mark, without the user's own changes.
+func (l *ChangeLog) Unread(ids ...string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	n := 0
@@ -186,7 +214,7 @@ func (l *ChangeLog) Unread(skipOwn bool, ids ...string) int {
 			continue
 		}
 		for _, e := range il.Entries {
-			if IsUnread(e, il.ReadAt) && !(skipOwn && e.Own) {
+			if IsUnread(e, il.ReadAt) {
 				n++
 			}
 		}

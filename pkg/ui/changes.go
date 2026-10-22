@@ -254,7 +254,7 @@ func (v *AppView) changesViewLocked() *changesView {
 		}
 		out = append(out, e)
 	}
-	cv := &changesView{key: key, entries: out, unread: v.changelog.Unread(v.config.ChangesHideOwn, scope...)}
+	cv := &changesView{key: key, entries: out, unread: v.changelog.Unread(scope...)}
 	cv.rows, cv.total = layoutChangeRows(out, now)
 	v.changesCache = cv
 	return cv
@@ -278,7 +278,7 @@ func (v *AppView) unreadByInstanceLocked() map[string]int {
 	}
 	counts := make(map[string]int, len(ids))
 	for _, id := range ids {
-		counts[id] = v.changelog.Unread(v.config.ChangesHideOwn, id)
+		counts[id] = v.changelog.Unread(id)
 	}
 	v.unreadByInst, v.unreadByInstKey = counts, key
 	return counts
