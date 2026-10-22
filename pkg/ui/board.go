@@ -93,19 +93,24 @@ func boardMaxScroll(body geometry.Rect, n int) float32 {
 	return total - body.Height()
 }
 
-// boardHit returns the ticket card under pos, if any.
-func boardHit(l boardLayout, cols [boardColumnCount][]jira.Issue, scroll [boardColumnCount]float32, pos geometry.Point) (jira.Issue, bool) {
+// boardHit returns the ticket card under pos, if any, and whether pos is on its key.
+func boardHit(l boardLayout, cols [boardColumnCount][]jira.Issue, scroll [boardColumnCount]float32, pos geometry.Point) (iss jira.Issue, onKey, ok bool) {
 	for c := range cols {
 		if !l.body[c].Contains(pos) {
 			continue
 		}
 		for i, iss := range cols[c] {
-			if boardCardRect(l.body[c], scroll[c], i).Contains(pos) {
-				return iss, true
+			if card := boardCardRect(l.body[c], scroll[c], i); card.Contains(pos) {
+				return iss, boardCardKeyRect(card, iss.Key).Contains(pos), true
 			}
 		}
 	}
-	return jira.Issue{}, false
+	return jira.Issue{}, false, false
+}
+
+// boardCardKeyRect is the ticket key of a card; clicking it shows the ticket's changes.
+func boardCardKeyRect(card geometry.Rect, key string) geometry.Rect {
+	return geometry.NewRect(card.Min.X+16, card.Min.Y+3, min(measureTextWidth(key, 10)+8, card.Width()-90), 19)
 }
 
 // expandedCardRect is the content area next to the dock shelf in the expanded window.
@@ -167,7 +172,12 @@ func (v *AppView) handleBoardClick(r geometry.Rect, pos geometry.Point) bool {
 	scroll := v.boardScroll
 	all := v.issues
 	v.mu.Unlock()
-	if iss, ok := boardHit(l, cols, scroll, pos); ok {
+	iss, onKey, ok := boardHit(l, cols, scroll, pos)
+	switch {
+	case !ok:
+	case onKey:
+		v.showTicketChanges(iss)
+	default:
 		if idx := indexOfIssue(all, iss); idx >= 0 {
 			v.Expand(idx)
 		}
@@ -185,11 +195,12 @@ func (v *AppView) handleBoardHover(r geometry.Rect, pos geometry.Point) bool {
 	}
 	defer v.mu.Unlock()
 	hovered := ""
-	if iss, ok := boardHit(l, groupBoard(v.getFilteredIssuesLocked()), v.boardScroll, pos); ok {
+	iss, onKey, ok := boardHit(l, groupBoard(v.getFilteredIssuesLocked()), v.boardScroll, pos)
+	if ok {
 		hovered = issueID(iss)
 	}
-	changed := hovered != v.hoveredBoardCard
-	v.hoveredBoardCard = hovered
+	changed := hovered != v.hoveredBoardCard || onKey != v.hoveredBoardKey
+	v.hoveredBoardCard, v.hoveredBoardKey = hovered, onKey
 	return changed
 }
 
@@ -271,7 +282,8 @@ func (v *AppView) drawBoard(canvas widget.Canvas, r geometry.Rect, s appViewStat
 			if card.Max.Y < body.Min.Y || card.Min.Y > body.Max.Y {
 				continue
 			}
-			v.drawBoardCard(canvas, card, iss, s, issueID(iss) == s.hoveredBoardCard)
+			hovered := issueID(iss) == s.hoveredBoardCard
+			v.drawBoardCard(canvas, card, iss, s, hovered, hovered && s.hoveredBoardKey)
 		}
 		canvas.PopClip()
 
@@ -283,7 +295,7 @@ func (v *AppView) drawBoard(canvas widget.Canvas, r geometry.Rect, s appViewStat
 	}
 }
 
-func (v *AppView) drawBoardCard(canvas widget.Canvas, card geometry.Rect, iss jira.Issue, s appViewStateSnapshot, hovered bool) {
+func (v *AppView) drawBoardCard(canvas widget.Canvas, card geometry.Rect, iss jira.Issue, s appViewStateSnapshot, hovered, keyHovered bool) {
 	bg := widget.RGBA8(32, 42, 62, 240)
 	border := widget.RGBA8(255, 255, 255, 30)
 	if hovered {
@@ -301,7 +313,13 @@ func (v *AppView) drawBoardCard(canvas widget.Canvas, card geometry.Rect, iss ji
 		}
 	}
 	canvas.DrawCircle(geometry.Pt(card.Min.X+10, card.Min.Y+13), 3, dot)
-	canvas.DrawText(iss.Key, geometry.NewRect(card.Min.X+18, card.Min.Y+6, card.Width()-90, 14), 10, widget.RGBA8(240, 247, 255, 255), true, widget.TextAlignLeft)
+	keyColor := widget.RGBA8(240, 247, 255, 255)
+	if keyHovered {
+		// The key links to the ticket's changes.
+		keyColor = colorChangeUnread
+		canvas.DrawLine(geometry.Pt(card.Min.X+18, card.Min.Y+20), geometry.Pt(card.Min.X+18+measureTextWidth(iss.Key, 10), card.Min.Y+20), keyColor, 1)
+	}
+	canvas.DrawText(iss.Key, geometry.NewRect(card.Min.X+18, card.Min.Y+6, card.Width()-90, 14), 10, keyColor, true, widget.TextAlignLeft)
 	if iss.Priority.Name != "" {
 		canvas.DrawText(truncateSummary(iss.Priority.Name, 12), geometry.NewRect(card.Max.X-78, card.Min.Y+7, 70, 12), 8, widget.RGBA8(160, 175, 200, 255), false, widget.TextAlignRight)
 	}

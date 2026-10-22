@@ -101,6 +101,7 @@ type AppView struct {
 	showBoard        bool
 	boardScroll      [boardColumnCount]float32
 	hoveredBoardCard string // issueID of the hovered card
+	hoveredBoardKey  bool   // the pointer is on that card's ticket key
 	hoveredBoard     bool   // board button hovered (fan and dock shelf)
 
 	// Changes tab of the board overlay (see changes.go).
@@ -187,6 +188,7 @@ type appViewStateSnapshot struct {
 	showBoard         bool
 	boardScroll       [boardColumnCount]float32
 	hoveredBoardCard  string
+	hoveredBoardKey   bool
 	hoveredBoard      bool
 	boardTab          int
 	changes           []jira.ChangeEntry
@@ -783,6 +785,7 @@ func (v *AppView) snapshot() appViewStateSnapshot {
 		showBoard:         v.showBoard,
 		boardScroll:       v.boardScroll,
 		hoveredBoardCard:  v.hoveredBoardCard,
+		hoveredBoardKey:   v.hoveredBoardKey,
 		hoveredBoard:      v.hoveredBoard,
 		boardTab:          v.boardTab,
 		changes:           changes,

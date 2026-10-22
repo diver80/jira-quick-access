@@ -321,3 +321,31 @@ func TestOverviewButtonLabelFits(t *testing.T) {
 		t.Fatal("settings button sticks out of the dock shelf")
 	}
 }
+
+func TestBoardCardKeyShowsTicketChanges(t *testing.T) {
+	view := newChangesTestView(t)
+	view.OpenBoard()
+	r := expandedCardRect(window.DockSideRight)
+	l := newBoardLayout(r)
+	card := boardCardRect(l.body[boardInProgress], 0, 0) // A-2
+	key := boardCardKeyRect(card, "A-2")
+
+	if !view.handleBoardHover(r, key.Center()) || !view.snapshot().hoveredBoardKey {
+		t.Fatal("hovering the key should highlight it as a link")
+	}
+	view.handleClick(key.Center())
+	s := view.snapshot()
+	if !view.IsBoardOpen() || s.boardTab != boardTabChanges || s.changesTicket != "a/A-2" {
+		t.Fatalf("clicking the key should show A-2's changes, tab %d filter %q", s.boardTab, s.changesTicket)
+	}
+	if len(s.changes) != 1 || s.changes[0].IssueKey != "A-2" {
+		t.Fatalf("only A-2's changes expected, got %+v", s.changes)
+	}
+
+	// The rest of the card still opens the ticket.
+	view.setBoardTab(boardTabBoard)
+	view.handleClick(geometry.Pt(card.Center().X, card.Max.Y-6))
+	if view.IsBoardOpen() || view.issues[view.activeIdx].Key != "A-2" {
+		t.Fatal("clicking the card outside the key should open the ticket")
+	}
+}

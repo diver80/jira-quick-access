@@ -378,6 +378,26 @@ func (v *AppView) setChangesTicket(id string) {
 	v.MarkNeedsLayout()
 }
 
+// showTicketChanges switches the overlay to the Changes tab filtered to iss.
+func (v *AppView) showTicketChanges(iss jira.Issue) {
+	v.mu.Lock()
+	instID := iss.InstanceID
+	if instID == "" { // demo and legacy tickets carry no instance ID
+		for i, inst := range v.config.Instances {
+			if isIssueForInstance(iss, inst, i) {
+				instID = inst.ID
+				break
+			}
+		}
+	}
+	v.showChangesTabLocked()
+	v.changesTicket = instID + "/" + iss.Key
+	v.changesScroll = 0
+	v.hoveredBoardCard, v.hoveredBoardKey = "", false
+	v.mu.Unlock()
+	v.MarkNeedsLayout()
+}
+
 // clearChangesTicket removes the ticket filter; it reports whether one was set.
 func (v *AppView) clearChangesTicket() bool {
 	v.mu.Lock()
