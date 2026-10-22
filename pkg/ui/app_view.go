@@ -109,6 +109,8 @@ type AppView struct {
 	boardTab          int
 	changesScroll     float32
 	hoveredChange     string               // instance ID + "/" + entry ID
+	hoveredChangeKey  bool                 // the pointer is on that entry's ticket key
+	changesTicket     string               // Changes tab limited to this ticket (instance ID + "/" + key)
 	changesReadAt     map[string]time.Time // read marks before the Changes tab was opened
 	ticketURLOverride string               // next ticket view loads this URL (e.g. a focused comment)
 	changesCache      *changesView
@@ -192,6 +194,8 @@ type appViewStateSnapshot struct {
 	changesTotal      float32
 	changesScroll     float32
 	hoveredChange     string
+	hoveredChangeKey  bool
+	changesTicket     string
 	changesReadAt     map[string]time.Time
 	changesUnread     int
 	changesOff        bool // changelog turned off for every instance in the board's scope
@@ -786,6 +790,8 @@ func (v *AppView) snapshot() appViewStateSnapshot {
 		changesTotal:      cv.total,
 		changesScroll:     v.changesScroll,
 		hoveredChange:     v.hoveredChange,
+		hoveredChangeKey:  v.hoveredChangeKey,
+		changesTicket:     v.changesTicket,
 		changesReadAt:     maps.Clone(v.changesReadAt),
 		changesUnread:     cv.unread,
 		changesOff:        len(v.changesScopeLocked()) == 0,
@@ -836,6 +842,7 @@ func (v *AppView) SetState(newState window.WindowState) {
 		v.showSettings = false
 		v.showStatus = false
 		v.showBoard = false
+		v.changesTicket = ""
 	}
 	showSettings := v.showSettings
 	showStatus := v.showStatus
@@ -2709,6 +2716,9 @@ func (v *AppView) handleKey(ev *event.KeyEvent) bool {
 		searchQ := v.searchQuery
 		v.mu.Unlock()
 
+		if v.clearChangesTicket() {
+			return true
+		}
 		if searchQ != "" {
 			v.mu.Lock()
 			v.searchQuery = ""

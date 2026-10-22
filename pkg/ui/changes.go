@@ -235,7 +235,7 @@ func (v *AppView) changesViewLocked() *changesView {
 		return &changesView{}
 	}
 	now := time.Now()
-	key := fmt.Sprintf("%d|%s|%s|%v|%s", v.changelog.Version(), strings.Join(scope, ","), v.searchQuery, v.config.ChangesHideOwn, now.Format("2006-01-02"))
+	key := fmt.Sprintf("%d|%s|%s|%v|%s|%s", v.changelog.Version(), strings.Join(scope, ","), v.searchQuery, v.config.ChangesHideOwn, v.changesTicket, now.Format("2006-01-02"))
 	if v.changesCache != nil && v.changesCache.key == key {
 		return v.changesCache
 	}
@@ -244,6 +244,9 @@ func (v *AppView) changesViewLocked() *changesView {
 	out := all[:0]
 	for _, e := range all {
 		if v.config.ChangesHideOwn && e.Own {
+			continue
+		}
+		if v.changesTicket != "" && changeTicketID(e) != v.changesTicket {
 			continue
 		}
 		if q != "" && !strings.Contains(strings.ToLower(e.IssueKey+" "+e.Summary+" "+e.Author+" "+e.Text+" "+e.To), q) {
@@ -360,6 +363,32 @@ func (v *AppView) openChange(e jira.ChangeEntry) {
 	}
 }
 
+// changeTicketID identifies the ticket of an entry across instances.
+func changeTicketID(e jira.ChangeEntry) string {
+	return e.InstanceID + "/" + e.IssueKey
+}
+
+// setChangesTicket limits the Changes tab to one ticket ("" shows all again).
+func (v *AppView) setChangesTicket(id string) {
+	v.mu.Lock()
+	v.changesTicket = id
+	v.changesScroll = 0
+	v.hoveredChange, v.hoveredChangeKey = "", false
+	v.mu.Unlock()
+	v.MarkNeedsLayout()
+}
+
+// clearChangesTicket removes the ticket filter; it reports whether one was set.
+func (v *AppView) clearChangesTicket() bool {
+	v.mu.Lock()
+	set := v.changesTicket != "" && v.showBoard && v.boardTab == boardTabChanges
+	v.mu.Unlock()
+	if set {
+		v.setChangesTicket("")
+	}
+	return set
+}
+
 func (v *AppView) issueInInstanceLocked(iss jira.Issue, instID string) bool {
 	for i, inst := range v.config.Instances {
 		if inst.ID == instID {
@@ -421,28 +450,48 @@ func changesMaxScroll(body geometry.Rect, total float32) float32 {
 	return max(0, total-body.Height())
 }
 
-func changeHit(body geometry.Rect, rows []changeRow, scroll float32, pos geometry.Point) (jira.ChangeEntry, bool) {
+// changeHit returns the entry under pos and whether pos is on its ticket key.
+func changeHit(body geometry.Rect, rows []changeRow, scroll float32, pos geometry.Point) (e jira.ChangeEntry, onKey, ok bool) {
 	if !body.Contains(pos) {
-		return jira.ChangeEntry{}, false
+		return jira.ChangeEntry{}, false, false
 	}
 	for _, row := range rows {
-		if row.header == "" && geometry.NewRect(body.Min.X, body.Min.Y+row.y-scroll, body.Width(), row.h).Contains(pos) {
-			return row.entry, true
+		rect := geometry.NewRect(body.Min.X, body.Min.Y+row.y-scroll, body.Width(), row.h)
+		if row.header == "" && rect.Contains(pos) {
+			return row.entry, changeKeyRect(rect, row.entry.IssueKey).Contains(pos), true
 		}
 	}
-	return jira.ChangeEntry{}, false
+	return jira.ChangeEntry{}, false, false
+}
+
+// changeKeyRect is the clickable ticket key of a row; clicking it filters by ticket.
+func changeKeyRect(row geometry.Rect, key string) geometry.Rect {
+	return geometry.NewRect(row.Min.X+58, row.Min.Y+4, min(measureTextWidth(key, 10)+10, 110), 19)
 }
 
 func (v *AppView) handleChangesClick(r geometry.Rect, pos geometry.Point) bool {
-	if newBoardLayout(r).hideOwn.Contains(pos) {
+	l := newBoardLayout(r)
+	if l.hideOwn.Contains(pos) {
 		v.toggleHideOwnChanges()
 		return true
 	}
 	v.mu.Lock()
 	rows := v.changesViewLocked().rows
 	scroll := v.changesScroll
+	filtered := v.changesTicket
 	v.mu.Unlock()
-	if e, ok := changeHit(changesBody(r), rows, scroll, pos); ok {
+	if filtered != "" && l.ticket.Contains(pos) {
+		v.setChangesTicket("")
+		return true
+	}
+	e, onKey, ok := changeHit(changesBody(r), rows, scroll, pos)
+	switch {
+	case !ok:
+	case onKey && filtered == changeTicketID(e):
+		v.setChangesTicket("")
+	case onKey:
+		v.setChangesTicket(changeTicketID(e))
+	default:
 		v.openChange(e)
 	}
 	return true
@@ -452,11 +501,12 @@ func (v *AppView) handleChangesHover(r geometry.Rect, pos geometry.Point) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	hovered := ""
-	if e, ok := changeHit(changesBody(r), v.changesViewLocked().rows, v.changesScroll, pos); ok {
+	e, onKey, ok := changeHit(changesBody(r), v.changesViewLocked().rows, v.changesScroll, pos)
+	if ok {
 		hovered = e.InstanceID + "/" + e.ID
 	}
-	changed := hovered != v.hoveredChange
-	v.hoveredChange = hovered
+	changed := hovered != v.hoveredChange || onKey != v.hoveredChangeKey
+	v.hoveredChange, v.hoveredChangeKey = hovered, onKey
 	return changed
 }
 
@@ -474,6 +524,12 @@ func (v *AppView) handleChangesWheel(r geometry.Rect, deltaY float32) {
 func (v *AppView) drawChanges(canvas widget.Canvas, r geometry.Rect, s appViewStateSnapshot) {
 	l := newBoardLayout(r)
 	drawToggleButton(canvas, l.hideOwn, "Hide mine", s.config.ChangesHideOwn)
+	if _, key, ok := strings.Cut(s.changesTicket, "/"); ok {
+		chip := geometry.NewRect(l.ticket.Min.X, l.ticket.Min.Y, min(l.ticket.Width(), measureTextWidth(key, 10)+34), l.ticket.Height())
+		canvas.DrawRoundRect(chip, widget.RGBA8(30, 90, 130, 250), 7)
+		canvas.StrokeRoundRect(chip, widget.RGBA8(255, 255, 255, 70), 7, 1.0)
+		canvas.DrawText(key+"  ×", chip, 10, widget.RGBA8(240, 248, 255, 255), true, widget.TextAlignCenter)
+	}
 
 	body := changesBody(r)
 	if len(s.changes) == 0 {
@@ -502,7 +558,8 @@ func (v *AppView) drawChanges(canvas widget.Canvas, r geometry.Rect, s appViewSt
 			continue
 		}
 		e := row.entry
-		v.drawChangeRow(canvas, rect, e, s, s.hoveredChange == e.InstanceID+"/"+e.ID)
+		hovered := s.hoveredChange == e.InstanceID+"/"+e.ID
+		v.drawChangeRow(canvas, rect, e, s, hovered, hovered && s.hoveredChangeKey)
 	}
 	canvas.PopClip()
 
@@ -513,7 +570,7 @@ func (v *AppView) drawChanges(canvas widget.Canvas, r geometry.Rect, s appViewSt
 	}
 }
 
-func (v *AppView) drawChangeRow(canvas widget.Canvas, rect geometry.Rect, e jira.ChangeEntry, s appViewStateSnapshot, hovered bool) {
+func (v *AppView) drawChangeRow(canvas widget.Canvas, rect geometry.Rect, e jira.ChangeEntry, s appViewStateSnapshot, hovered, keyHovered bool) {
 	bg := widget.RGBA8(28, 37, 56, 235)
 	border := widget.RGBA8(255, 255, 255, 25)
 	if e.Mentioned {
@@ -545,8 +602,15 @@ func (v *AppView) drawChangeRow(canvas widget.Canvas, rect geometry.Rect, e jira
 	}
 	x := rect.Min.X + 22
 	canvas.DrawText(e.At.Local().Format("15:04"), geometry.NewRect(x, rect.Min.Y+7, 34, 14), 9, secondary, false, widget.TextAlignLeft)
-	keyW := min(measureTextWidth(e.IssueKey, 10)+10, 110)
-	canvas.DrawText(e.IssueKey, geometry.NewRect(x+36, rect.Min.Y+6, keyW, 15), 10, primary, true, widget.TextAlignLeft)
+	keyRect := changeKeyRect(rect, e.IssueKey)
+	keyW := keyRect.Width()
+	keyColor := primary
+	if keyHovered {
+		// The key is a link that filters the tab to this ticket.
+		keyColor = colorChangeUnread
+		canvas.DrawLine(geometry.Pt(keyRect.Min.X, rect.Min.Y+20), geometry.Pt(keyRect.Min.X+measureTextWidth(e.IssueKey, 10), rect.Min.Y+20), keyColor, 1)
+	}
+	canvas.DrawText(e.IssueKey, geometry.NewRect(keyRect.Min.X, rect.Min.Y+6, keyW, 15), 10, keyColor, true, widget.TextAlignLeft)
 
 	authorW := float32(130)
 	author := e.Author

@@ -58,6 +58,7 @@ type boardLayout struct {
 	close   geometry.Rect
 	tabs    [2]geometry.Rect                // Board / Changes switch
 	hideOwn geometry.Rect                   // Changes tab: "Hide mine"
+	ticket  geometry.Rect                   // Changes tab: chip of the ticket filter (clears it)
 	cols    [boardColumnCount]geometry.Rect // column background incl. header
 	body    [boardColumnCount]geometry.Rect // scrollable card area
 }
@@ -67,6 +68,7 @@ func newBoardLayout(r geometry.Rect) boardLayout {
 	l.tabs[boardTabBoard] = geometry.NewRect(r.Min.X+16, r.Min.Y+10, 66, 24)
 	l.tabs[boardTabChanges] = geometry.NewRect(r.Min.X+86, r.Min.Y+10, 100, 24)
 	l.hideOwn = geometry.NewRect(l.close.Min.X-100, l.close.Min.Y, 92, 26)
+	l.ticket = geometry.NewRect(r.Min.X+194, r.Min.Y+10, l.hideOwn.Min.X-8-(r.Min.X+194), 24)
 	gap := float32(10)
 	colW := (r.Width() - 32 - 2*gap) / boardColumnCount
 	top := r.Min.Y + 56
@@ -226,6 +228,9 @@ func (v *AppView) drawBoard(canvas widget.Canvas, r geometry.Rect, s appViewStat
 	sub := fmt.Sprintf("%s · %d tickets", scope, len(s.filteredIssues))
 	if s.boardTab == boardTabChanges {
 		sub = fmt.Sprintf("%s · %d changes", scope, len(s.changes))
+		if _, key, ok := strings.Cut(s.changesTicket, "/"); ok {
+			sub += " of " + key
+		}
 	}
 	if s.searchQuery != "" {
 		sub += fmt.Sprintf(" · search \"%s\"", s.searchQuery)
@@ -350,7 +355,8 @@ func fitText(text string, size, maxW float32) string {
 	return "…"
 }
 
-// drawBoardButton draws the "Board" entry with a small three-column glyph.
+// drawBoardButton draws the "Overview" entry (board and changes) with a small
+// three-column glyph.
 func drawBoardButton(canvas widget.Canvas, r geometry.Rect, active, hovered, unread bool) {
 	bg := widget.RGBA8(36, 46, 66, 230)
 	border := widget.RGBA8(255, 255, 255, 45)
@@ -364,13 +370,13 @@ func drawBoardButton(canvas widget.Canvas, r geometry.Rect, active, hovered, unr
 	canvas.DrawRoundRect(r, bg, 8)
 	canvas.StrokeRoundRect(r, border, 8, 1.0)
 
-	iconX := r.Min.X + 9
+	iconX := r.Min.X + 8
 	iconY := r.Min.Y + r.Height()/2 - 5
 	fg := widget.RGBA8(230, 240, 255, 255)
 	for i, hgt := range []float32{10, 7, 4} {
 		canvas.DrawRoundRect(geometry.NewRect(iconX+float32(i)*4, iconY, 3, hgt), fg, 1)
 	}
-	canvas.DrawText("Board", geometry.NewRect(iconX+14, r.Min.Y+r.Height()/2-8, r.Width()-25, 16), 10, fg, true, widget.TextAlignLeft)
+	canvas.DrawText("Overview", geometry.NewRect(iconX+13, r.Min.Y+r.Height()/2-8, r.Width()-23, 16), 10, fg, true, widget.TextAlignLeft)
 	if unread {
 		canvas.DrawCircle(geometry.Pt(r.Max.X-6, r.Min.Y+6), 3.5, colorChangeUnread)
 	}
@@ -395,14 +401,14 @@ func drawSettingsIconButton(canvas widget.Canvas, r geometry.Rect, active, hover
 	}
 }
 
-// Bottom row of the fan and of the expanded dock shelf: board button, then settings.
-func fanBoardButtonRect(w, h float32) geometry.Rect    { return geometry.NewRect(7, h-42, 64, 34) }
-func fanSettingsButtonRect(w, h float32) geometry.Rect { return geometry.NewRect(75, h-42, w-82, 34) }
+// Bottom row of the fan and of the expanded dock shelf: overview button, then settings.
+func fanBoardButtonRect(w, h float32) geometry.Rect    { return geometry.NewRect(7, h-42, w-45, 34) }
+func fanSettingsButtonRect(w, h float32) geometry.Rect { return geometry.NewRect(w-34, h-42, 27, 34) }
 
 func shelfBoardButtonRect(tabStartX, h float32) geometry.Rect {
-	return geometry.NewRect(tabStartX+2, h-48, 60, 34)
+	return geometry.NewRect(tabStartX+2, h-48, 70, 34)
 }
 
 func shelfSettingsButtonRect(tabStartX, h float32) geometry.Rect {
-	return geometry.NewRect(tabStartX+66, h-48, 30, 34)
+	return geometry.NewRect(tabStartX+75, h-48, 26, 34)
 }

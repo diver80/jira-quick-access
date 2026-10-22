@@ -251,3 +251,73 @@ func TestDayLabels(t *testing.T) {
 		}
 	}
 }
+
+func TestClickingKeyFiltersChangesToTicket(t *testing.T) {
+	view := newChangesTestView(t)
+	view.mu.Lock()
+	view.changelog.Add("a", []jira.ChangeEntry{{ID: "c:2", IssueKey: "A-2", Kind: jira.ChangeComment, Text: "zweiter", At: time.Now().Add(-time.Minute)}}, time.Now())
+	view.mu.Unlock()
+	view.OpenChanges()
+	r := expandedCardRect(window.DockSideRight)
+	body := changesBody(r)
+	rowRect := func(key string) geometry.Rect {
+		for _, row := range view.snapshot().changeRows {
+			if row.header == "" && row.entry.IssueKey == key {
+				return geometry.NewRect(body.Min.X, body.Min.Y+row.y, body.Width(), row.h)
+			}
+		}
+		t.Fatalf("no row for %s", key)
+		return geometry.Rect{}
+	}
+
+	view.handleClick(changeKeyRect(rowRect("A-2"), "A-2").Center())
+	s := view.snapshot()
+	if !view.IsBoardOpen() || s.changesTicket != "a/A-2" || len(s.changes) != 2 {
+		t.Fatalf("clicking the key should show only A-2's changes, got %q %+v", s.changesTicket, s.changes)
+	}
+	if !drawnTexts(view)["A-2  ×"] {
+		t.Error("the ticket filter should show a chip to clear it")
+	}
+
+	// Clicking the row next to the key still opens the ticket.
+	row := rowRect("A-2")
+	view.handleClick(geometry.Pt(row.Max.X-40, row.Max.Y-8))
+	if view.IsBoardOpen() || view.issues[view.activeIdx].Key != "A-2" {
+		t.Fatal("clicking the row should open the ticket")
+	}
+	// Back from the ticket, the filter is still there; collapsing to the fan resets it.
+	if view.snapshot().changesTicket != "a/A-2" {
+		t.Fatal("opening the ticket should keep the filter for the way back")
+	}
+	view.SetState(window.StateFan)
+	if view.snapshot().changesTicket != "" {
+		t.Fatal("collapsing resets the ticket filter")
+	}
+
+	// The chip and Escape clear the filter; Escape keeps the tab open.
+	view.OpenChanges()
+	view.handleClick(changeKeyRect(rowRect("A-2"), "A-2").Center())
+	view.handleClick(newBoardLayout(r).ticket.Min.Add(geometry.Pt(8, 8)))
+	if view.snapshot().changesTicket != "" {
+		t.Fatal("the chip should clear the filter")
+	}
+	view.handleClick(changeKeyRect(rowRect("A-1"), "A-1").Center())
+	view.handleKey(event.NewKeyEvent(event.KeyPress, event.KeyEscape, 0, event.ModNone))
+	if !view.IsBoardOpen() || view.snapshot().changesTicket != "" {
+		t.Fatal("Escape should clear the ticket filter first")
+	}
+}
+
+func TestOverviewButtonLabelFits(t *testing.T) {
+	for _, r := range []geometry.Rect{fanBoardButtonRect(120, 400), shelfBoardButtonRect(0, 580)} {
+		if measureTextWidth("Overview", 10) > r.Width()-23 {
+			t.Fatalf("label does not fit button %+v", r)
+		}
+	}
+	if fanBoardButtonRect(120, 400).Max.X >= fanSettingsButtonRect(120, 400).Min.X || shelfBoardButtonRect(0, 580).Max.X >= shelfSettingsButtonRect(0, 580).Min.X {
+		t.Fatal("overview and settings buttons overlap")
+	}
+	if shelfSettingsButtonRect(0, 580).Max.X > 110-6 {
+		t.Fatal("settings button sticks out of the dock shelf")
+	}
+}
