@@ -8,7 +8,7 @@ set -e
 APP_NAME="jira-quick-access"
 APP_DISPLAY_NAME="Jira Quick Access"
 BUNDLE_ID="com.avono.jira-quick-access"
-VERSION="${VERSION:-1.3.2}"
+VERSION="${VERSION:-1.3.3}"
 BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS="-s -w -X main.version=${VERSION} -X main.buildTime=${BUILD_TIME}"
 DIST_DIR="$(pwd)/dist"

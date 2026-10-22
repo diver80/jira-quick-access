@@ -6,7 +6,7 @@ No dock clutter, no window to manage. Slide the pointer to the right edge and th
 
 📥 **[Release history & downloads (Confluence)](https://avono.atlassian.net/wiki/spaces/~557058ea22d0f92e8646e397b6334abc9884fd/pages/2098888731/App+Jira+Quick+Access)**
 
-Current source version: **1.3.2**. Build outputs are generated locally under `dist/` and are not committed to Git. See Confluence for binary publication status.
+Current source version: **1.3.3**. Build outputs are generated locally under `dist/` and are not committed to Git. See Confluence for binary publication status.
 
 > [!NOTE]
 > **Platform Support**: Currently, **only the macOS (Darwin) version is actively tested and verified** (with native Cocoa edge docking, Retina multi-resolution icons, and embedded WebKit). Windows and Linux builds are experimental cross-compilations and not yet thoroughly tested. On Windows and Linux, tickets open in the default browser (no embedded ticket view), the fan closes after 8 seconds without pointer movement, and the global hotkey, notifications, launch at login and always-on-top/auto-hide are not available.
@@ -139,10 +139,10 @@ The bundled `build.sh` script automates cross-compilation, icon packaging, and d
 
 Generated artifacts are placed in `dist/`:
 - `dist/osx.noindex/Jira Quick Access.app` (macOS Universal 2 App Bundle with Retina `AppIcon.icns`)
-- `dist/osx/Jira Quick Access-v1.3.2-macOS-Universal.dmg` (Drag-and-Drop Disk Image Installer)
-- `dist/osx/JiraQuickAccess-v1.3.2-macOS-Universal.tar.gz`
-- `dist/win/jira-quick-access-v1.3.2-windows-{amd64,arm64}.zip`
-- `dist/lin/jira-quick-access-v1.3.2-linux-{amd64,arm64}.tar.gz`
+- `dist/osx/Jira Quick Access-v1.3.3-macOS-Universal.dmg` (Drag-and-Drop Disk Image Installer)
+- `dist/osx/JiraQuickAccess-v1.3.3-macOS-Universal.tar.gz`
+- `dist/win/jira-quick-access-v1.3.3-windows-{amd64,arm64}.zip`
+- `dist/lin/jira-quick-access-v1.3.3-linux-{amd64,arm64}.tar.gz`
 
 ### 🍎 How to Install & Launch on macOS:
 
@@ -166,7 +166,7 @@ brew upgrade --cask jira-quick-access
 Run `./build.sh install`. This compiles Universal 2 binaries, creates the `.app` bundle, installs it directly into `/Applications/`, and clears quarantine flags.
 
 #### Option C: Standard macOS DMG Installer
-Download `Jira.Quick.Access-v1.3.2-macOS-Universal.dmg` from [GitHub Releases](https://github.com/diver80/jira-quick-access/releases), open the `.dmg` in Finder, and drag the **Jira Quick Access** icon onto the **Applications** folder shortcut.
+Download `Jira.Quick.Access-v1.3.3-macOS-Universal.dmg` from [GitHub Releases](https://github.com/diver80/jira-quick-access/releases), open the `.dmg` in Finder, and drag the **Jira Quick Access** icon onto the **Applications** folder shortcut.
 
 ### 🚀 Launching & Autostart
 1. **Launch**: Press `⌘ + Space`, type `Jira Quick Access`, and hit `Enter`.
