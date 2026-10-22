@@ -389,14 +389,20 @@ func drawBoardButton(canvas widget.Canvas, r geometry.Rect, active, hovered, unr
 	canvas.StrokeRoundRect(r, border, 8, 1.0)
 
 	iconX := r.Min.X + 8
-	iconY := r.Min.Y + r.Height()/2 - 5
 	fg := widget.RGBA8(230, 240, 255, 255)
-	for i, hgt := range []float32{10, 7, 4} {
-		canvas.DrawRoundRect(geometry.NewRect(iconX+float32(i)*4, iconY, 3, hgt), fg, 1)
-	}
+	drawBoardGlyph(canvas, geometry.NewRect(iconX, r.Min.Y, 11, r.Height()), fg)
 	canvas.DrawText("Overview", geometry.NewRect(iconX+13, r.Min.Y+r.Height()/2-8, r.Width()-23, 16), 10, fg, true, widget.TextAlignLeft)
 	if unread {
 		canvas.DrawCircle(geometry.Pt(r.Max.X-6, r.Min.Y+6), 3.5, colorChangeUnread)
+	}
+}
+
+// drawBoardGlyph draws the three-column board symbol centred in r.
+func drawBoardGlyph(canvas widget.Canvas, r geometry.Rect, color widget.Color) {
+	x := r.Center().X - 5.5
+	y := r.Center().Y - 5
+	for i, hgt := range []float32{10, 7, 4} {
+		canvas.DrawRoundRect(geometry.NewRect(x+float32(i)*4, y, 3, hgt), color, 1)
 	}
 }
 

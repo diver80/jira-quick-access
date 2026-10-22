@@ -379,3 +379,33 @@ func TestRestCapsuleMarksInstancesWithUnseenChanges(t *testing.T) {
 		t.Fatalf("markers should clear, got %v", s.unreadByInstance)
 	}
 }
+
+func TestRestCapsuleOverviewIcon(t *testing.T) {
+	view := newChangesTestView(t)
+	view.SetState(window.StateRest)
+	w, h := float32(36), float32(224)
+
+	// Overview and settings badges stack below the instances without overlapping.
+	ov, set := restOverviewRect(w, h), restSettingsRect(w, h)
+	if ov.Max.Y > set.Min.Y || ov.Min.Y < h-restBottomOffset || set.Max.Y > h-4 {
+		t.Fatalf("badges out of place: overview %+v settings %+v", ov, set)
+	}
+
+	view.mu.Lock()
+	view.restHoverStart = time.Now().Add(-time.Second)
+	view.mu.Unlock()
+	view.handleHover(ov.Center())
+	if s := view.snapshot(); !s.hoveredBoard || s.hoveredSettings || s.state != window.StateRest {
+		t.Fatal("hovering the overview badge should highlight it and keep the capsule")
+	}
+	view.handleClick(ov.Center())
+	if !view.IsBoardOpen() {
+		t.Fatal("the overview badge should open the board")
+	}
+
+	view.SetState(window.StateRest)
+	view.handleClick(set.Center())
+	if s := view.snapshot(); !s.showSettings {
+		t.Fatal("the gear badge should still open the settings")
+	}
+}

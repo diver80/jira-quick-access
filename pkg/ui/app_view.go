@@ -141,6 +141,18 @@ type AppView struct {
 	uiTasks        []func()
 }
 
+// The rest capsule ends with two stacked icon badges: overview (board / changes)
+// above settings. restBottomOffset is the height they take below the instances.
+const restBottomOffset = float32(47)
+
+func restOverviewRect(w, h float32) geometry.Rect {
+	return geometry.NewRect(w/2-12, h-43, 24, 17)
+}
+
+func restSettingsRect(w, h float32) geometry.Rect {
+	return geometry.NewRect(w/2-12, h-23, 24, 17)
+}
+
 // fanIdleCollapse closes the fan on platforms without pointer tracking after this
 // long without pointer movement over it.
 const fanIdleCollapse = 8 * time.Second
@@ -1376,7 +1388,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 		canvas.DrawCircle(geometry.Pt(centerX+4, b.Min.Y+4.0), 1.0, widget.RGBA8(255, 255, 255, 100))
 
 		topOffset := float32(6)
-		bottomOffset := float32(31)
+		bottomOffset := restBottomOffset
 
 		// 4. Top Global Status Badge (Distinct icon badge, non-instance specific)
 		if s.config.StatusCheckEnabled {
@@ -1437,7 +1449,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			}
 
 			// Instance Beacon Core & Radiant Glow (Centered at capsule middle X)
-			beaconCenter := geometry.Pt(centerX, secY+8)
+			beaconCenter := geometry.Pt(centerX, secY+7)
 			canvas.DrawCircle(beaconCenter, 6.0, beaconGlow)
 			canvas.DrawCircle(beaconCenter, 3.5, beaconColor)
 
@@ -1501,7 +1513,7 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			badgeW := float32(19)
 			badgeH := float32(18)
 			badgeX := centerX - badgeW/2
-			badgeY := secY + 18
+			badgeY := secY + 15
 			countBox := geometry.NewRect(badgeX, badgeY, badgeW, badgeH)
 			countFg := widget.RGBA8(245, 250, 255, 255)
 			if s.unreadByInstance[inst.ID] > 0 {
@@ -1519,20 +1531,30 @@ func (v *AppView) Draw(ctx widget.Context, canvas widget.Canvas) {
 			}
 		}
 
-		// Bottom Divider Line above settings
-		bottomDividerY := b.Min.Y + h - 29
+		// Bottom Divider Line above overview and settings
+		bottomDividerY := b.Min.Y + h - restBottomOffset + 2
 		canvas.DrawLine(geometry.Pt(b.Min.X+7, bottomDividerY), geometry.Pt(b.Min.X+w-7, bottomDividerY), widget.RGBA8(255, 255, 255, 45), 1.0)
 
-		// Settings Gear Icon Badge (Distinct icon badge, non-instance specific)
-		setBg := widget.RGBA8(36, 46, 66, 230)
-		setBorder := widget.RGBA8(255, 255, 255, 45)
-		if s.hoveredSettings {
-			setBg = widget.RGBA8(52, 68, 96, 245)
-			setBorder = widget.RGBA8(255, 255, 255, 120)
+		// Overview (board / changes) and settings icon badges
+		iconBadge := func(r geometry.Rect, hovered bool) {
+			bg, border := widget.RGBA8(36, 46, 66, 230), widget.RGBA8(255, 255, 255, 45)
+			if hovered {
+				bg, border = widget.RGBA8(52, 68, 96, 245), widget.RGBA8(255, 255, 255, 120)
+			}
+			canvas.DrawRoundRect(r, bg, 5)
+			canvas.StrokeRoundRect(r, border, 5, 1.0)
 		}
-		setRect := geometry.NewRect(centerX-12, b.Min.Y+h-25, 24, 18)
-		canvas.DrawRoundRect(setRect, setBg, 5)
-		canvas.StrokeRoundRect(setRect, setBorder, 5, 1.0)
+		ovRect := restOverviewRect(w, h).Translate(b.Min)
+		iconBadge(ovRect, s.hoveredBoard)
+		drawBoardGlyph(canvas, ovRect, widget.RGBA8(220, 235, 255, 240))
+		for _, n := range s.unreadByInstance {
+			if n > 0 {
+				canvas.DrawCircle(geometry.Pt(ovRect.Max.X-1, ovRect.Min.Y+1), 3, colorChangeUnread)
+				break
+			}
+		}
+		setRect := restSettingsRect(w, h).Translate(b.Min)
+		iconBadge(setRect, s.hoveredSettings)
 		drawGearIcon(canvas, setRect, 5.5, widget.RGBA8(220, 235, 255, 240))
 		if s.update.Version != "" {
 			drawUpdateDot(canvas, geometry.Pt(setRect.Max.X-1, setRect.Min.Y+1))
@@ -2255,9 +2277,11 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 			return true
 		}
 
-		if pos.Y >= b.Min.Y+h-28 {
+		if pos.Y >= b.Min.Y+h-restBottomOffset {
+			onSettings := pos.Y >= restSettingsRect(w, h).Min.Y-2
 			v.mu.Lock()
-			v.hoveredSettings = true
+			v.hoveredSettings = onSettings
+			v.hoveredBoard = !onSettings
 			v.hoveredStatus = false
 			v.mu.Unlock()
 			v.MarkNeedsLayout()
@@ -2268,9 +2292,10 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 		}
 
 		v.mu.Lock()
-		if v.hoveredStatus || v.hoveredSettings {
+		if v.hoveredStatus || v.hoveredSettings || v.hoveredBoard {
 			v.hoveredStatus = false
 			v.hoveredSettings = false
+			v.hoveredBoard = false
 			v.MarkNeedsLayout()
 			if v.onRedraw != nil {
 				v.onRedraw()
@@ -2289,7 +2314,7 @@ func (v *AppView) handleHover(pos geometry.Point) bool {
 		v.mu.Unlock()
 
 		topOffset := float32(6)
-		bottomOffset := float32(31)
+		bottomOffset := restBottomOffset
 		if statusEnabled {
 			topOffset = float32(31)
 		}
@@ -2496,8 +2521,12 @@ func (v *AppView) handleClick(pos geometry.Point) bool {
 			v.StartDrag()
 			return true
 		}
-		if pos.Y >= b.Min.Y+h-28 {
+		if pos.Y >= b.Min.Y+restSettingsRect(w, h).Min.Y-2 {
 			v.OpenSettings()
+			return true
+		}
+		if pos.Y >= b.Min.Y+h-restBottomOffset {
+			v.OpenBoard()
 			return true
 		}
 		v.SetState(window.StateFan)
